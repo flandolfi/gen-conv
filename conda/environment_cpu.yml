@@ -1,0 +1,29 @@
+name: gconv
+channels:
+  - pytorch
+dependencies:
+  - python=3.8
+  - cpuonly
+  - pytorch=2.0.0
+  - torchvision
+  - torchaudio
+  - pip
+  - pip:
+    - -f https://data.pyg.org/whl/torch-2.0.0+cu117.html
+    - pyg_lib
+    - torch_geometric
+    - torch_scatter
+    - torch_sparse
+    - torch_cluster
+    - torch_spline_conv
+    - pytorch-lightning
+    - "ray[tune]"
+    - scikit-learn
+    - numpy
+    - pandas
+    - fire
+    - matplotlib
+    - seaborn
+    - networkx
+    - tqdm
+    - h5py
