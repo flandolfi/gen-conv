@@ -9,6 +9,7 @@ from gconv.conv import GenConv
 from gconv.pool import KMISPooling
 
 from torch_geometric.nn import Sequential
+from torch_geometric.nn.norm import BatchNorm
 from torch_geometric.nn.dense import Linear
 from torch_geometric.nn.pool.glob import global_mean_pool
 from torch_geometric.typing import Adj, OptTensor
@@ -27,9 +28,12 @@ class InvertedResidualBlock(Module):
         self.out_channels = out_channels or in_channels
         self.stride = stride
 
-        self.exp_lin = Linear(in_channels, multiplier * in_channels)
-        self.red_lin = Linear(multiplier * in_channels, out_channels)
-        self.conv = GenConv(multiplier * in_channels, **conv_kwargs)
+        self.exp_lin = Linear(in_channels, multiplier*in_channels)
+        self.exp_norm = BatchNorm(multiplier*in_channels)
+        self.conv = GenConv(multiplier*in_channels, **conv_kwargs)
+        self.conv_norm = BatchNorm(multiplier*in_channels)
+        self.red_lin = Linear(multiplier*in_channels, out_channels)
+        self.red_norm = BatchNorm(out_channels)
         self.pool = None
 
         if stride > 1:
@@ -39,6 +43,7 @@ class InvertedResidualBlock(Module):
                 pos: OptTensor = None, batch: OptTensor = None) \
             -> Tuple[Tensor, Adj, OptTensor, OptTensor, OptTensor]:
         y = self.exp_lin(x)
+        y = self.exp_norm(y)
         y = F.relu6(y)
         y = self.conv(y, edge_index, edge_attr, pos)
 
@@ -46,8 +51,10 @@ class InvertedResidualBlock(Module):
             y, edge_index, edge_attr, pos, batch, _, _ = \
                 self.pool(y, edge_index, edge_attr, pos, batch)
 
+        y = self.conv_norm(y)
         y = F.relu6(y)
         y = self.red_lin(y)
+        y = self.red_norm(y)
 
         if self.stride == 1 and self.out_channels == self.in_channels:
             y = y + x
@@ -69,6 +76,7 @@ class MobileNetV2(Baseline):
 
         self.conv = GenConv(in_channels=in_channels, out_channels=c,
                             pos_channels=pos_channels)
+        self.conv_norm = BatchNorm(c)
         self.pool = KMISPooling(k=1)
         signature = 'x, e_i, e_w, pos, b -> x, e_i, e_w, pos, b'
 
@@ -110,6 +118,7 @@ class MobileNetV2(Baseline):
         ])
 
         self.lin = Linear(in_channels=10*c, out_channels=40*c)
+        self.lin_norm = BatchNorm(40*c)
         self.out = Linear(in_channels=40*c, out_channels=out_channels)
 
     def forward(self, x=None, pos=None, edge_index=None, edge_attr=None, batch=None):
@@ -117,8 +126,12 @@ class MobileNetV2(Baseline):
         x, edge_index, edge_attr, pos, batch, _, _ = \
             self.pool(x, edge_index, edge_attr, pos, batch)
 
+        x = self.conv_norm(x)
+        x = F.relu6(x)
+
         x, edge_index, edge_attr, pos, batch = self.model(x, edge_index, edge_attr, pos, batch)
         x = self.lin(x)
         x = global_mean_pool(x, batch)
+        x = self.lin_norm(x)
 
         return self.out(x)
