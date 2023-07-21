@@ -56,8 +56,8 @@ class InvertedResidualBlock(Module):
 
 
 class MobileNetV2(Baseline):
-    def __init__(self, dataset):
-        super().__init__(dataset=dataset)
+    def __init__(self, dataset, *args, **kwargs):
+        super().__init__(dataset=dataset, *args, **kwargs)
         in_channels = dataset.num_node_features
         out_channels = dataset.num_classes
         pos_channels = None
