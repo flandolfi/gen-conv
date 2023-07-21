@@ -43,7 +43,6 @@ def get_datasets(dataset: str = 'DD',
                 PreSelect(1024),
                 T.NormalizeScale(),
                 T.KNNGraph(8, loop=True, force_undirected=True),
-                T.ToUndirected(),
             ])
             transform = ClonePos()
 
