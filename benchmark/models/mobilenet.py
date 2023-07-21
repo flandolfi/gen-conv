@@ -40,7 +40,7 @@ class InvertedResidualBlock(Module):
             -> Tuple[Tensor, Adj, OptTensor, OptTensor, OptTensor]:
         y = self.exp_lin(x)
         y = F.relu6(y)
-        y = self.conv(y, edge_index, edge_attr, pos, batch)
+        y = self.conv(y, edge_index, edge_attr, pos)
 
         if self.stride > 1:
             y, edge_index, edge_attr, pos, batch, _, _ = \
@@ -60,30 +60,53 @@ class MobileNetV2(Baseline):
         super().__init__(dataset=dataset)
         in_channels = dataset.num_node_features
         out_channels = dataset.num_classes
-        c = 4
+        pos_channels = None
 
-        self.conv = GenConv(in_channels=in_channels, out_channels=c)
+        if dataset.data.pos is not None:
+            pos_channels = dataset.data.pos.size(1)
+
+        c = 32
+
+        self.conv = GenConv(in_channels=in_channels, out_channels=c,
+                            pos_channels=pos_channels)
         self.pool = KMISPooling(k=1)
         signature = 'x, e_i, e_w, pos, b -> x, e_i, e_w, pos, b'
 
-        self.model = Sequential('x, pos, e_i, e_w, b', [
-            (InvertedResidualBlock(in_channels=c, out_channels=c//2, multiplier=1), signature),
-            (InvertedResidualBlock(in_channels=c//2, out_channels=3*c//4, stride=2), signature),
-            (InvertedResidualBlock(in_channels=3*c//4, out_channels=3*c//4), signature),
-            (InvertedResidualBlock(in_channels=3*c//4, out_channels=c, stride=2), signature),
-            (InvertedResidualBlock(in_channels=c, out_channels=c), signature),
-            (InvertedResidualBlock(in_channels=c, out_channels=c), signature),
-            (InvertedResidualBlock(in_channels=c, out_channels=2*c, stride=2), signature),
-            (InvertedResidualBlock(in_channels=2*c, out_channels=2*c), signature),
-            (InvertedResidualBlock(in_channels=2*c, out_channels=2*c), signature),
-            (InvertedResidualBlock(in_channels=2*c, out_channels=2*c), signature),
-            (InvertedResidualBlock(in_channels=2*c, out_channels=3*c), signature),
-            (InvertedResidualBlock(in_channels=3*c, out_channels=3*c), signature),
-            (InvertedResidualBlock(in_channels=3*c, out_channels=3*c), signature),
-            (InvertedResidualBlock(in_channels=3*c, out_channels=5*c, stride=2), signature),
-            (InvertedResidualBlock(in_channels=5*c, out_channels=5*c), signature),
-            (InvertedResidualBlock(in_channels=5*c, out_channels=5*c), signature),
-            (InvertedResidualBlock(in_channels=5*c, out_channels=10*c), signature),
+        self.model = Sequential('x, e_i, e_w, pos, b', [
+            (InvertedResidualBlock(in_channels=c, out_channels=c//2,
+                                   multiplier=1, pos_channels=pos_channels), signature),
+            (InvertedResidualBlock(in_channels=c//2, out_channels=3*c//4,
+                                   stride=2, pos_channels=pos_channels), signature),
+            (InvertedResidualBlock(in_channels=3*c//4, out_channels=3*c//4,
+                                   pos_channels=pos_channels), signature),
+            (InvertedResidualBlock(in_channels=3*c//4, out_channels=c,
+                                   stride=2, pos_channels=pos_channels), signature),
+            (InvertedResidualBlock(in_channels=c, out_channels=c,
+                                   pos_channels=pos_channels), signature),
+            (InvertedResidualBlock(in_channels=c, out_channels=c,
+                                   pos_channels=pos_channels), signature),
+            (InvertedResidualBlock(in_channels=c, out_channels=2*c,
+                                   pos_channels=pos_channels, stride=2), signature),
+            (InvertedResidualBlock(in_channels=2*c, out_channels=2*c,
+                                   pos_channels=pos_channels), signature),
+            (InvertedResidualBlock(in_channels=2*c, out_channels=2*c,
+                                   pos_channels=pos_channels), signature),
+            (InvertedResidualBlock(in_channels=2*c, out_channels=2*c,
+                                   pos_channels=pos_channels), signature),
+            (InvertedResidualBlock(in_channels=2*c, out_channels=3*c,
+                                   pos_channels=pos_channels), signature),
+            (InvertedResidualBlock(in_channels=3*c, out_channels=3*c,
+                                   pos_channels=pos_channels), signature),
+            (InvertedResidualBlock(in_channels=3*c, out_channels=3*c,
+                                   pos_channels=pos_channels), signature),
+            (InvertedResidualBlock(in_channels=3*c, out_channels=5*c,
+                                   stride=2, pos_channels=pos_channels), signature),
+            (InvertedResidualBlock(in_channels=5*c, out_channels=5*c,
+                                   pos_channels=pos_channels), signature),
+            (InvertedResidualBlock(in_channels=5*c, out_channels=5*c,
+                                   pos_channels=pos_channels), signature),
+            (InvertedResidualBlock(in_channels=5*c, out_channels=10*c,
+                                   pos_channels=pos_channels), signature),
         ])
 
         self.lin = Linear(in_channels=10*c, out_channels=40*c)
