@@ -2,12 +2,14 @@ from typing import Tuple
 
 from .baseline import Baseline
 
+import torch
 from torch import Tensor
 from torch.nn import Module, functional as F
 
 from gconv.conv import GenConv
 from gconv.pool import KMISPooling
 
+from torch_geometric.data import InMemoryDataset
 from torch_geometric.nn import Sequential
 from torch_geometric.nn.norm import BatchNorm
 from torch_geometric.nn.dense import Linear
@@ -63,7 +65,8 @@ class InvertedResidualBlock(Module):
 
 
 class MobileNetV2(Baseline):
-    def __init__(self, dataset, *args, **kwargs):
+    def __init__(self, dataset: InMemoryDataset,
+                 *args, **kwargs):
         super().__init__(dataset=dataset, *args, **kwargs)
         in_channels = dataset.num_node_features
         out_channels = dataset.num_classes
@@ -135,3 +138,9 @@ class MobileNetV2(Baseline):
         x = self.lin_norm(x)
 
         return self.out(x)
+
+    def configure_optimizers(self):
+        opt = torch.optim.RMSprop(self.parameters(), lr=self.lr,
+                                  momentum=0.9, alpha=0.9, weight_decay=0.00004)
+        sch = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.98)
+        return [opt], [sch]
