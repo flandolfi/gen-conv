@@ -39,13 +39,13 @@ def get_datasets(dataset: str = 'DD',
     with FileLock(os.path.expanduser('~/.data.lock')):
         if dataset in {'ModelNet40', 'model-net'}:
             root = os.path.join(root, 'ModelNet40')
-            pre_transform = PreSelect(1024)
-            transform = T.Compose([
+            pre_transform = T.Compose([
+                PreSelect(1024),
                 T.NormalizeScale(),
                 T.RadiusGraph(0.2, loop=True),
                 T.ToUndirected(),
-                ClonePos(),
             ])
+            transform = ClonePos()
 
             train_dataset = ModelNet40(root=root, train=True,
                                        transform=transform,
