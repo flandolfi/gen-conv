@@ -247,7 +247,7 @@ class KMISPooling(Module):
             x_sums = (adj @ x) / degree
             x = x_sums - x
 
-        return x.norm(-1)
+        return torch.norm(x, p=2, dim=-1)
 
     def _scorer(self, x: Tensor, edge_index: Adj, edge_attr: OptTensor = None,
                 batch: OptTensor = None) -> Tensor:
