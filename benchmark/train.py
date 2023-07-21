@@ -42,7 +42,7 @@ def get_datasets(dataset: str = 'DD',
             pre_transform = T.Compose([
                 PreSelect(1024),
                 T.NormalizeScale(),
-                T.RadiusGraph(0.2, loop=True),
+                T.KNNGraph(8, loop=True, force_undirected=True),
                 T.ToUndirected(),
             ])
             transform = ClonePos()
