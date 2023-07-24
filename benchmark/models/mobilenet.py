@@ -30,16 +30,16 @@ class InvertedResidualBlock(Module):
         self.out_channels = out_channels or in_channels
         self.stride = stride
 
-        self.exp_lin = Linear(in_channels, multiplier*in_channels)
+        self.exp_lin = Linear(in_channels, multiplier*in_channels, bias=False)
         self.exp_norm = BatchNorm(multiplier*in_channels)
         self.conv = GenConv(multiplier*in_channels, **conv_kwargs)
         self.conv_norm = BatchNorm(multiplier*in_channels)
-        self.red_lin = Linear(multiplier*in_channels, out_channels)
+        self.red_lin = Linear(multiplier*in_channels, out_channels, bias=False)
         self.red_norm = BatchNorm(out_channels)
         self.pool = None
 
         if stride > 1:
-            self.pool = KMISPooling(k=stride - 1)
+            self.pool = KMISPooling(in_channels=multiplier*in_channels, k=stride - 1)
 
     def forward(self, x: Tensor, edge_index: Adj, edge_attr: OptTensor = None,
                 pos: OptTensor = None, batch: OptTensor = None) \
@@ -80,7 +80,7 @@ class MobileNetV2(Baseline):
         self.conv = GenConv(in_channels=in_channels, out_channels=c,
                             pos_channels=pos_channels)
         self.conv_norm = BatchNorm(c)
-        self.pool = KMISPooling(k=1)
+        self.pool = KMISPooling(in_channels=c, k=1)
         signature = 'x, e_i, e_w, pos, b -> x, e_i, e_w, pos, b'
 
         self.model = Sequential('x, e_i, e_w, pos, b', [
@@ -120,7 +120,7 @@ class MobileNetV2(Baseline):
                                    pos_channels=pos_channels), signature),
         ])
 
-        self.lin = Linear(in_channels=10*c, out_channels=40*c)
+        self.lin = Linear(in_channels=10*c, out_channels=40*c, bias=False)
         self.lin_norm = BatchNorm(40*c)
         self.out = Linear(in_channels=40*c, out_channels=out_channels)
 
@@ -138,9 +138,3 @@ class MobileNetV2(Baseline):
         x = self.lin_norm(x)
 
         return self.out(x)
-
-    def configure_optimizers(self):
-        opt = torch.optim.RMSprop(self.parameters(), lr=self.lr,
-                                  momentum=0.9, alpha=0.9, weight_decay=0.00004)
-        sch = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=0.98)
-        return [opt], [sch]

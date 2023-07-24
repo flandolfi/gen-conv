@@ -1,1 +1,3 @@
 from .mobilenet import MobileNetV2
+from .vgg import VGG16
+from .dgcnn import DGCNN, CustomDGCNN
