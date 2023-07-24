@@ -41,25 +41,34 @@ def get_datasets(dataset: str = 'DD',
             root = os.path.join(root, 'ModelNet40')
             pre_transform = T.Compose([
                 PreSelect(1024),
-                T.NormalizeScale(),
-                T.KNNGraph(6, loop=True, force_undirected=True),
+                # T.NormalizeScale(),
+                T.KNNGraph(8, loop=True, force_undirected=True),
             ])
-            transform = ClonePos()
+            train_transform = T.Compose([
+                # T.RandomRotate(45, axis=0),
+                # T.RandomRotate(45, axis=1),
+                # T.RandomRotate(45, axis=2),
+                T.RandomScale((2/3, 3/2)),
+                # T.RandomTranslate(0.2),
+                ClonePos(),
+            ])
+            valid_transform = ClonePos()
 
             train_dataset = ModelNet40(root=root, train=True,
-                                       transform=transform,
+                                       transform=train_transform,
                                        pre_transform=pre_transform)
             test_dataset = ModelNet40(root=root, train=False,
-                                      transform=transform,
+                                      transform=valid_transform,
                                       pre_transform=pre_transform)
 
             train_idx = list(range(len(train_dataset)))
             y = train_dataset.data.y.numpy()
-            train_idx, valid_idx = train_test_split(train_idx, test_size=0.125,
+            train_idx, valid_idx = train_test_split(train_idx, test_size=0.1,
                                                     random_state=seed,
                                                     stratify=y)
             valid_dataset = train_dataset[valid_idx]
             train_dataset = train_dataset[train_idx]
+            valid_dataset.transform = valid_transform
         elif dataset in {'mal-net', 'MalNet', 'MalNetTiny'}:
             root = os.path.join(root, 'MalNetTiny')
             transform = T.Compose([T.Constant(), T.ToUndirected()])
