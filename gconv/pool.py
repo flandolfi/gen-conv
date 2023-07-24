@@ -17,7 +17,7 @@ from torch_geometric.utils import scatter
 
 from .utils import maximal_independent_set
 
-Scorer = Callable[[Tensor, Adj, OptTensor, OptTensor], Tensor]
+Scorer = Callable[[Tensor, Adj, OptTensor, OptTensor, OptTensor], Tensor]
 
 
 def maximal_independent_set_cluster(edge_index: Adj, k: int = 1,
@@ -178,8 +178,8 @@ class KMISPooling(Module):
     }
 
     def __init__(self, in_channels: Optional[int] = None, k: int = 1,
-                 scorer: Union[Scorer, str] = 'curvature',
-                 score_heuristic: Optional[str] = 'greedy',
+                 scorer: Union[Scorer, str] = 'random',
+                 score_heuristic: Optional[str] = None,
                  score_passthrough: Optional[str] = None,
                  aggr_x: Optional[Union[str, Aggregation]] = None,
                  aggr_edge: str = 'sum',
@@ -250,8 +250,11 @@ class KMISPooling(Module):
         return torch.norm(x, p=2, dim=-1)
 
     def _scorer(self, x: Tensor, edge_index: Adj, edge_attr: OptTensor = None,
-                batch: OptTensor = None) -> Tensor:
+                pos: OptTensor = None, batch: OptTensor = None) -> Tensor:
         if self.scorer == 'curvature':
+            if pos is not None:
+                x = pos
+            
             return self._absolute_mean_curvature(x, edge_index, edge_attr)
 
         if self.scorer == 'linear':
@@ -272,7 +275,7 @@ class KMISPooling(Module):
         if self.scorer == 'last':
             return x[..., [-1]]
 
-        return self.scorer(x, edge_index, edge_attr, batch)
+        return self.scorer(x, edge_index, edge_attr, pos, batch)
 
     def forward(self, x: Tensor, edge_index: Adj,
                 edge_attr: OptTensor = None,
@@ -285,7 +288,7 @@ class KMISPooling(Module):
         if not isinstance(edge_index, SparseTensor):
             adj = SparseTensor.from_edge_index(edge_index, edge_attr, (n, n))
 
-        score = self._scorer(x, edge_index, edge_attr, batch)
+        score = self._scorer(x, edge_index, edge_attr, pos, batch)
         updated_score = self._apply_heuristic(score, adj)
         perm = torch.argsort(updated_score.view(-1), 0, descending=True)
 
@@ -326,7 +329,7 @@ class KMISPooling(Module):
         if pos is not None:
             if self.aggr_pos is None:
                 pos = pos[mis]
-            elif isinstance(self.aggr_x, str):
+            elif isinstance(self.aggr_pos, str):
                 pos = scatter(pos, cluster, dim=0, dim_size=c, reduce=self.aggr_pos)
             else:
                 pos = self.aggr_pos(pos, cluster, dim_size=c)
