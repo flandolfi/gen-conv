@@ -1,6 +1,8 @@
 from abc import abstractmethod
 
 import torch
+from torch.optim import Adam
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 
 from torch_geometric.data import InMemoryDataset
 
@@ -11,13 +13,17 @@ from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 class Baseline(LightningModule):
     def __init__(self, dataset: InMemoryDataset,
                  lr: float = 0.001,
-                 patience: int = 30):
+                 patience: int = 500,
+                 cosine_t_0: int = 20,
+                 cosine_t_mult: int = 2):
         super(Baseline, self).__init__()
 
         self.dataset = dataset
         self.loss = torch.nn.CrossEntropyLoss()
         self.patience = patience
         self.lr = lr
+        self.cosine_t_0 = cosine_t_0
+        self.cosine_t_mult = cosine_t_mult
 
     @staticmethod
     def accuracy(y_pred, y_true):
@@ -55,7 +61,9 @@ class Baseline(LightningModule):
                  on_epoch=True, batch_size=y_hat.size(0))
 
     def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.lr)
+        opt = Adam(self.parameters(), lr=self.lr)
+        sch = CosineAnnealingWarmRestarts(opt, self.cosine_t_0, self.cosine_t_mult)
+        return [opt], [sch]
 
     def configure_callbacks(self):
         early_stop = EarlyStopping(monitor="val_loss", mode="min",
