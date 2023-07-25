@@ -1,3 +1,5 @@
+import torch
+
 from torch_geometric.transforms import BaseTransform
 from torch_geometric.data import Data
 
@@ -14,6 +16,18 @@ class PreSelect(BaseTransform):
             data['pos'] = data.pos[:self.num_nodes]
 
         data['num_nodes'] = self.num_nodes
+        return data
+
+
+class RandomTranslate(BaseTransform):
+    def __init__(self, delta_max: float = 0.2):
+        self.delta_max = delta_max
+    
+    def __call__(self, data: Data):
+        pos = data.pos
+        translation = torch.rand((1, pos.size(-1)), 
+                                 dtype=pos.dtype, device=pos.device)
+        data['pos'] = pos + 2*self.delta_max*translation - self.delta_max
         return data
 
 
