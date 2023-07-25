@@ -15,11 +15,12 @@ class Baseline(LightningModule):
                  lr: float = 0.001,
                  patience: int = 500,
                  cosine_t_0: int = 20,
-                 cosine_t_mult: int = 2):
+                 cosine_t_mult: int = 2,
+                 label_smoothing: float = 0.2):
         super(Baseline, self).__init__()
 
         self.dataset = dataset
-        self.loss = torch.nn.CrossEntropyLoss()
+        self.loss = torch.nn.CrossEntropyLoss(label_smoothing=label_smoothing)
         self.patience = patience
         self.lr = lr
         self.cosine_t_0 = cosine_t_0
