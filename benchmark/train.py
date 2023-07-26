@@ -23,7 +23,7 @@ import pandas as pd
 
 from benchmark import models
 from benchmark.datasets import ModelNet40
-from benchmark.transforms import PreSelect, ClonePos
+from benchmark.transforms import PreSelect, ClonePos, RandomTranslate
 
 warnings.filterwarnings("ignore", category=Warning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -41,15 +41,11 @@ def get_datasets(dataset: str = 'DD',
             root = os.path.join(root, 'ModelNet40')
             pre_transform = T.Compose([
                 PreSelect(1024),
-                # T.NormalizeScale(),
                 T.KNNGraph(8, loop=True, force_undirected=True),
             ])
             train_transform = T.Compose([
-                # T.RandomRotate(45, axis=0),
-                # T.RandomRotate(45, axis=1),
-                # T.RandomRotate(45, axis=2),
                 T.RandomScale((2/3, 3/2)),
-                # T.RandomTranslate(0.2),
+                RandomTranslate(0.2),
                 ClonePos(),
             ])
             valid_transform = ClonePos()
