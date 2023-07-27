@@ -19,7 +19,7 @@ class GenConv(Module):
                  trainable_offsets: bool = True,
                  metric: str = 'euclidean',
                  temperature: Union[float, str] = 'same',
-                 depthwise: bool = False,
+                 groups: int = 1,
                  aggr: str = 'add',
                  offset_initializer: str = 'uniform',
                  weight_initializer: str = 'kaiming_uniform',
@@ -32,7 +32,7 @@ class GenConv(Module):
 
         self.num_offsets = num_offsets
         self.metric = metric
-        self.depthwise = depthwise
+        self.groups = groups
         self.aggr = aggr
         self.temperature = temperature
 
@@ -46,10 +46,7 @@ class GenConv(Module):
         self.offset = Parameter(Tensor(self.num_offsets, self.pos_channels),
                                 requires_grad=trainable_offsets)
 
-        if self.depthwise:
-            self.weight = Parameter(Tensor(self.num_offsets, self.in_channels))
-        else:
-            self.weight = Parameter(Tensor(self.num_offsets, self.out_channels*self.in_channels))
+        self.weight = Parameter(Tensor(self.num_offsets, self.out_channels*self.in_channels//self.groups))
 
         if bias:
             self.bias = Parameter(Tensor(1, self.out_channels))
@@ -112,14 +109,13 @@ class GenConv(Module):
 
         W = alpha @ self.weight
 
-        if self.depthwise:
-            msg = W*x[col]
-        else:
-            msg = torch.bmm(W.view(-1, self.out_channels, self.in_channels), 
-                            x[col].unsqueeze(-1)).squeeze(-1)
-        
-        out = scatter(msg*val.view(-1, 1), row, dim=0, 
-                      dim_size=x.size(0), reduce=self.aggr)
+        W = W.view(-1, self.groups, self.out_channels//self.groups, self.in_channels//self.groups)
+        x = x.view(-1, self.groups, self.in_channels//self.groups, 1)
+
+        msg = W @ x[col]
+        msg = msg.view(-1, self.out_channels) * val.view(-1, 1)
+
+        out = scatter(msg, row, dim=0, dim_size=x.size(0), reduce=self.aggr)
 
         if self.bias is not None:
             out = out + self.bias
