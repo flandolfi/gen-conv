@@ -75,9 +75,9 @@ class CustomDGCNN(Baseline):
         if dataset.data.pos is not None:
             pos_channels = dataset.data.pos.size(1)
 
-        c = 32
-        emb_dim = 512
-        conv_kwargs = dict(bias=True, aggr='add', metric='cosine', temperature='same', pos_channels=pos_channels)
+        c = 64
+        emb_dim = 1024
+        conv_kwargs = dict(bias=False, aggr='add', metric='cosine', temperature='same', pos_channels=pos_channels)
 
         self.conv1 = PyGSeq('x, e_i, e_w, p', [
             (GenConv(in_channels=in_channels, out_channels=c, **conv_kwargs), 'x, e_i, e_w, p -> x'),
@@ -90,12 +90,12 @@ class CustomDGCNN(Baseline):
             (LeakyReLU(0.2), 'x -> x'),
         ])
         self.conv3 = PyGSeq('x, e_i, e_w, p', [
-            (GenConv(in_channels=c, out_channels=c*2, **conv_kwargs), 'x, e_i, e_w, p -> x'),
+            (GenConv(in_channels=c, out_channels=c*2, groups=c, **conv_kwargs), 'x, e_i, e_w, p -> x'),
             (BatchNorm(c*2), 'x -> x'),
             (LeakyReLU(0.2), 'x -> x'),
         ])
         self.conv4 = PyGSeq('x, e_i, e_w, p', [
-            (GenConv(in_channels=c*2, out_channels=c*4, **conv_kwargs), 'x, e_i, e_w, p -> x'),
+            (GenConv(in_channels=c*2, out_channels=c*4, groups=c*2, **conv_kwargs), 'x, e_i, e_w, p -> x'),
             (BatchNorm(c*4), 'x -> x'),
             (LeakyReLU(0.2), 'x -> x'),
         ])

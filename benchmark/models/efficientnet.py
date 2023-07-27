@@ -10,6 +10,7 @@ from torch_geometric.nn.glob import global_mean_pool
 from torch_geometric.nn.dense import Linear
 from torch_geometric.nn.norm import BatchNorm
 from torch_geometric.typing import OptTensor, Adj
+from torch_geometric.nn.aggr import MultiAggregation, MaxAggregation, MeanAggregation
 
 from gconv.conv import GenConv
 from gconv.pool import KMISPooling
@@ -86,8 +87,9 @@ class MobileBottleneckConv(Module):
                  bias: bool = False,
                  **conv_kwargs):
         super().__init__()
-        conv_kwargs['depthwise'] = not fused
+        conv_kwargs['groups'] = 1 if fused else in_channels
         conv_kwargs['bias'] = bias
+        conv_kwargs.setdefault('metric', 'cosine')
 
         bn_kwargs = dict(eps=0.001, momentum=0.1, affine=True)
 
@@ -239,6 +241,105 @@ class EfficientNetV2(Baseline):
             (global_mean_pool, 'x, b -> x'),
             (Dropout(p=0.2), 'x -> x'),
             (Linear(1280, out_channels)),
+        ])
+
+        self.model = Sequential(signature, layers)
+
+    def forward(self, x=None, pos=None, edge_index=None, edge_attr=None, batch=None):
+        return self.model(x, edge_index, edge_attr, pos, batch)
+
+
+class CustomEfficientNetV2(Baseline):
+    def __init__(self, dataset: InMemoryDataset,
+                 delta_drop_probability: float = 0.005,
+                 *args, **kwargs):
+        super().__init__(dataset=dataset, *args, **kwargs)
+
+        in_channels = dataset.num_features
+        out_channels = dataset.num_classes
+        pos_channels = None
+
+        if dataset.pos is not None:
+            pos_channels = dataset.pos.size(1)
+
+        signature = 'x, e_i, e_w, p, b'
+        c = 32
+
+        bn_kwargs = dict(eps=0.001, momentum=0.1, affine=True)
+
+        layers = [
+            (GenConv(in_channels=in_channels, out_channels=c,
+                     pos_channels=pos_channels, bias=False), 'x, e_i, e_w, p -> x'),
+            # (KMISPooling(in_channels=c, k=1), f'{signature} -> {signature}, m, c'),
+            (BatchNorm(in_channels=c, **bn_kwargs), 'x -> x'),
+            (SiLU(True), 'x -> x'),
+        ]
+
+        def _p_gen():
+            p = 0
+            while p < 1:
+                yield p
+                p += delta_drop_probability
+
+        drop_p_gen = _p_gen()
+        mb_signature = f'{signature} -> {signature}'
+
+        layers.extend([
+            (MobileBottleneckConv(in_channels=c, out_channels=c,
+                                  pos_channels=pos_channels,
+                                  fused=True, multiplier=1, squeeze=None,
+                                  stochastic_depth=next(drop_p_gen)), mb_signature),
+            (MobileBottleneckConv(in_channels=c, out_channels=c,
+                                  pos_channels=pos_channels,
+                                  fused=True, multiplier=1, squeeze=None,
+                                  stochastic_depth=next(drop_p_gen)), mb_signature),
+        ])
+
+        for i in range(3):
+            layers.append((MobileBottleneckConv(in_channels=c if i == 0 else c*2,
+                                                pos_channels=pos_channels,
+                                                out_channels=c*2, stride=2 if i == 0 else 1,
+                                                fused=True, multiplier=4, squeeze=None,
+                                                stochastic_depth=next(drop_p_gen)), mb_signature))
+
+        # for i in range(4):
+        #     layers.append((MobileBottleneckConv(in_channels=c*2 if i == 0 else 128,
+        #                                         pos_channels=pos_channels,
+        #                                         out_channels=128, stride=2 if i == 0 else 1,
+        #                                         fused=True, multiplier=4, squeeze=None,
+        #                                         stochastic_depth=next(drop_p_gen)), mb_signature))
+
+        for i in range(6):
+            layers.append((MobileBottleneckConv(in_channels=64 if i == 0 else 128,
+                                                pos_channels=pos_channels,
+                                                out_channels=128, stride=2 if i == 0 else 1,
+                                                fused=False, multiplier=4, squeeze=0.25,
+                                                stochastic_depth=next(drop_p_gen)), mb_signature))
+
+        # for i in range(9):
+        #     layers.append((MobileBottleneckConv(in_channels=128 if i == 0 else 160,
+        #                                         pos_channels=pos_channels,
+        #                                         out_channels=160, stride=1,
+        #                                         fused=False, multiplier=6, squeeze=0.25,
+        #                                         stochastic_depth=next(drop_p_gen)), mb_signature))
+
+        for i in range(9):
+            layers.append((MobileBottleneckConv(in_channels=128 if i == 0 else 256,
+                                                pos_channels=pos_channels,
+                                                out_channels=256, stride=2 if i == 0 else 1,
+                                                fused=False, multiplier=6, squeeze=0.25,
+                                                stochastic_depth=next(drop_p_gen)), mb_signature))
+
+        layers.extend([
+            (Linear(256, 512, bias=False), 'x -> x'),
+            (BatchNorm(in_channels=512, **bn_kwargs), 'x -> x'),
+            (SiLU(True), 'x -> x'),
+            (MultiAggregation([
+                MeanAggregation(), 
+                MaxAggregation(), 
+            ]), 'x, b -> x'),
+            (Dropout(p=0.2), 'x -> x'),
+            (Linear(1024, out_channels)),
         ])
 
         self.model = Sequential(signature, layers)
