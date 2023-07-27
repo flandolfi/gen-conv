@@ -26,14 +26,14 @@ class GenConv(Module):
                  bias_initializer: str = 'uniform'):
         super().__init__()
 
-        assert in_channels % groups == 0, \
-            "`in_channels` must be divisible by `groups`"
-        assert out_channels % groups == 0, \
-            "`out_channels` must be divisible by `groups`"
-
         self.in_channels = in_channels
         self.out_channels = out_channels or in_channels
         self.pos_channels = pos_channels or in_channels
+
+        assert self.in_channels % groups == 0, \
+            "`in_channels` must be divisible by `groups`"
+        assert self.out_channels % groups == 0, \
+            "`out_channels` must be divisible by `groups`"
 
         self.num_offsets = num_offsets
         self.metric = metric
