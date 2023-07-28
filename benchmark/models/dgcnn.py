@@ -77,25 +77,32 @@ class CustomDGCNN(Baseline):
 
         c = 64
         emb_dim = 1024
-        conv_kwargs = dict(bias=False, aggr='add', metric='cosine', temperature='same', pos_channels=pos_channels)
+        conv_kwargs = dict(bias=False, aggr='max', metric='cosine', temperature='same', pos_channels=pos_channels)
+        signature = 'x, e_i, e_w, p'
 
-        self.conv1 = PyGSeq('x, e_i, e_w, p', [
-            (GenConv(in_channels=in_channels, out_channels=c, **conv_kwargs), 'x, e_i, e_w, p -> x'),
+        self.conv1 = PyGSeq(signature, [
+            (GenConv(in_channels=in_channels, out_channels=c, **conv_kwargs), f'{signature} -> x'),
             (BatchNorm(c), 'x -> x'),
             (LeakyReLU(0.2), 'x -> x'),
         ])
-        self.conv2 = PyGSeq('x, e_i, e_w, p', [
-            (GenConv(in_channels=c, out_channels=c, **conv_kwargs), 'x, e_i, e_w, p -> x'),
+        self.conv2 = PyGSeq(signature, [
+            (GenConv(in_channels=c, out_channels=c, **conv_kwargs), f'{signature} -> x'),
             (BatchNorm(c), 'x -> x'),
             (LeakyReLU(0.2), 'x -> x'),
         ])
-        self.conv3 = PyGSeq('x, e_i, e_w, p', [
-            (GenConv(in_channels=c, out_channels=c*2, groups=c, **conv_kwargs), 'x, e_i, e_w, p -> x'),
+        self.conv3 = PyGSeq(signature, [
+            (GenConv(in_channels=c, out_channels=c*2, groups=c, **conv_kwargs), f'{signature} -> x'),
+            (BatchNorm(c*2), 'x -> x'),
+            (LeakyReLU(0.2), 'x -> x'),
+            (Linear(in_channels=c*2, out_channels=c*2, bias=False)),
             (BatchNorm(c*2), 'x -> x'),
             (LeakyReLU(0.2), 'x -> x'),
         ])
-        self.conv4 = PyGSeq('x, e_i, e_w, p', [
-            (GenConv(in_channels=c*2, out_channels=c*4, groups=c*2, **conv_kwargs), 'x, e_i, e_w, p -> x'),
+        self.conv4 = PyGSeq(signature, [
+            (GenConv(in_channels=c*2, out_channels=c*4, groups=c*2, **conv_kwargs), f'{signature} -> x'),
+            (BatchNorm(c*4), 'x -> x'),
+            (LeakyReLU(0.2), 'x -> x'),
+            (Linear(in_channels=c*4, out_channels=c*4, bias=False)),
             (BatchNorm(c*4), 'x -> x'),
             (LeakyReLU(0.2), 'x -> x'),
         ])
