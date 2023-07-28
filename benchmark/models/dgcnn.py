@@ -86,7 +86,10 @@ class CustomDGCNN(Baseline):
             (LeakyReLU(0.2), 'x -> x'),
         ])
         self.conv2 = PyGSeq(signature, [
-            (GenConv(in_channels=c, out_channels=c, **conv_kwargs), f'{signature} -> x'),
+            (GenConv(in_channels=c, out_channels=c, groups=c, **conv_kwargs), f'{signature} -> x'),
+            (BatchNorm(c), 'x -> x'),
+            (LeakyReLU(0.2), 'x -> x'),
+            (Linear(in_channels=c, out_channels=c, bias=False)),
             (BatchNorm(c), 'x -> x'),
             (LeakyReLU(0.2), 'x -> x'),
         ])
