@@ -5,12 +5,12 @@ import torch
 from torch import Tensor
 from torch.nn import Parameter, Module, functional as F
 
-from torch_geometric.nn import inits, knn_graph
+from torch_geometric.nn import inits, knn_graph, MessagePassing
 from torch_geometric.utils import scatter
 from torch_geometric.typing import OptTensor, Adj
 
 
-class GenConv(Module):
+class GenConv(MessagePassing):
     def __init__(self, in_channels: int,
                  out_channels: Optional[int] = None,
                  pos_channels: Optional[int] = None,
@@ -20,11 +20,11 @@ class GenConv(Module):
                  metric: str = 'euclidean',
                  temperature: Union[float, str] = 'same',
                  groups: int = 1,
-                 aggr: str = 'add',
                  offset_initializer: str = 'uniform',
                  weight_initializer: str = 'kaiming_uniform',
-                 bias_initializer: str = 'uniform'):
-        super().__init__()
+                 bias_initializer: str = 'uniform',
+                 *args, **kwargs):
+        super(GenConv, self).__init__(*args, **kwargs)
 
         self.in_channels = in_channels
         self.out_channels = out_channels or in_channels
@@ -38,7 +38,6 @@ class GenConv(Module):
         self.num_offsets = num_offsets
         self.metric = metric
         self.groups = groups
-        self.aggr = aggr
         self.temperature = temperature
 
         if temperature == 'same':
@@ -50,8 +49,9 @@ class GenConv(Module):
 
         self.offset = Parameter(Tensor(self.num_offsets, self.pos_channels),
                                 requires_grad=trainable_offsets)
-
-        self.weight = Parameter(Tensor(self.num_offsets, self.out_channels*self.in_channels//self.groups))
+        
+        param_per_offset = self.out_channels*self.in_channels//self.groups
+        self.weight = Parameter(Tensor(self.num_offsets, param_per_offset))
 
         if bias:
             self.bias = Parameter(Tensor(1, self.out_channels))
@@ -100,32 +100,31 @@ class GenConv(Module):
         if pos is None:
             pos = x
 
-        if torch.is_tensor(edge_index):
-            row, col = edge_index
-            val = edge_attr
-        else:
-            row, col, val = edge_index.coo()
-
-        if val is None:
-            val = torch.ones_like(row, dtype=torch.float)
-
-        sim = self.pairwise_similarity(pos[col] - pos[row])
-        alpha = torch.softmax(sim*self.temperature, dim=-1)
-
-        W = alpha @ self.weight
-
-        W = W.view(-1, self.groups, self.out_channels//self.groups, self.in_channels//self.groups)
-        x = x.view(-1, self.groups, self.in_channels//self.groups, 1)
-
-        msg = W @ x[col]
-        msg = msg.view(-1, self.out_channels) * val.view(-1, 1)
-
-        out = scatter(msg, row, dim=0, dim_size=x.size(0), reduce=self.aggr)
+        # propagate_type: (x: Tensor, pos: Tensor, edge_attr: OptTensor)
+        out = self.propagate(edge_index, x=x, pos=pos, edge_attr=edge_attr)
 
         if self.bias is not None:
             out = out + self.bias
 
         return out
+
+    def message(self, x_j: Tensor, pos_i: Tensor, pos_j: Tensor, 
+                edge_attr: OptTensor = None) -> Tensor:
+        sim = self.pairwise_similarity(pos_j - pos_i)
+        alpha = torch.softmax(sim*self.temperature, dim=-1)
+
+        W_j = alpha @ self.weight
+
+        W_j = W_j.view(-1, self.groups, self.out_channels//self.groups,
+                       self.in_channels//self.groups)
+        x_j = x_j.view(-1, self.groups, self.in_channels//self.groups, 1)
+
+        msg = (W_j @ x_j).view(-1, self.out_channels)
+
+        if edge_attr is not None:
+            msg = msg * edge_attr.view(-1, 1)
+        
+        return msg
 
 
 class DynamicGenConv(GenConv):
