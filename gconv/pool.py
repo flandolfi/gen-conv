@@ -178,9 +178,11 @@ class KMISPooling(Module):
     }
 
     def __init__(self, in_channels: Optional[int] = None, k: int = 1,
-                 scorer: Union[Scorer, str] = 'random',
-                 score_heuristic: Optional[str] = None,
+                 scorer: Union[Scorer, str] = 'constant',
+                 score_heuristic: Optional[str] = 'greedy',
+                 score_heuristic_on_train: bool = True,
                  score_passthrough: Optional[str] = None,
+                 score_random_on_train: bool = True,
                  aggr_x: Optional[Union[str, Aggregation]] = None,
                  aggr_edge: str = 'sum',
                  aggr_pos: Optional[str] = None,
@@ -201,6 +203,9 @@ class KMISPooling(Module):
         self.score_heuristic = score_heuristic
         self.score_passthrough = score_passthrough
 
+        self.score_heuristic_on_train = score_heuristic_on_train
+        self.score_random_on_train = score_random_on_train
+
         self.aggr_x = aggr_x
         self.aggr_pos = aggr_pos or aggr_x
         self.aggr_edge = aggr_edge
@@ -216,7 +221,8 @@ class KMISPooling(Module):
                               weight_initializer='uniform')
 
     def _apply_heuristic(self, x: Tensor, adj: SparseTensor) -> Tensor:
-        if self.score_heuristic is None:
+        if (self.training and not self.score_heuristic_on_train) or \
+                self.score_heuristic is None:
             return x
 
         n = adj.size(0)
@@ -251,6 +257,10 @@ class KMISPooling(Module):
 
     def _scorer(self, x: Tensor, edge_index: Adj, edge_attr: OptTensor = None,
                 pos: OptTensor = None, batch: OptTensor = None) -> Tensor:
+        if (self.training and self.score_random_on_train) or \
+                self.scorer == 'random':
+            return torch.rand((x.size(0), 1), device=x.device)
+
         if self.scorer == 'curvature':
             if pos is not None:
                 x = pos
@@ -259,9 +269,6 @@ class KMISPooling(Module):
 
         if self.scorer == 'linear':
             return self.lin(x).sigmoid()
-
-        if self.scorer == 'random':
-            return torch.rand((x.size(0), 1), device=x.device)
 
         if self.scorer == 'constant':
             return torch.ones((x.size(0), 1), device=x.device)
