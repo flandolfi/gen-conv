@@ -41,7 +41,7 @@ def get_datasets(dataset: str = 'DD',
             root = os.path.join(root, 'ModelNet40')
             pre_transform = T.Compose([
                 PreSelect(1024),
-                T.KNNGraph(8, loop=True, force_undirected=True),
+                T.KNNGraph(20),
             ])
             train_transform = T.Compose([
                 T.RandomScale((2/3, 3/2)),
