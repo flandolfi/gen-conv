@@ -1,5 +1,6 @@
 import math
-from typing import Optional, Union
+from typing import Optional, Union, Sequence, Callable
+from itertools import product
 
 import torch
 from torch import Tensor
@@ -9,16 +10,18 @@ from torch_geometric.nn import inits, knn_graph, MessagePassing
 from torch_geometric.utils import scatter
 from torch_geometric.typing import OptTensor, Adj
 
+Similarity = Callable[[Tensor, Tensor], Tensor]
+
 
 class GenConv(MessagePassing):
     def __init__(self, in_channels: int,
                  out_channels: Optional[int] = None,
                  pos_channels: Optional[int] = None,
                  bias: bool = True,
-                 num_offsets: int = 8,
-                 trainable_offsets: bool = True,
-                 metric: str = 'euclidean',
-                 temperature: Union[float, str] = 'same',
+                 offsets: Union[int, Sequence[float], Tensor] = 8,
+                 learn_offsets: bool = True,
+                 similarity: Union[str, Similarity] = 'cosine',
+                 temperature: Union[float, str] = 'learn',
                  groups: int = 1,
                  offset_initializer: str = 'uniform',
                  weight_initializer: str = 'kaiming_uniform',
@@ -35,23 +38,35 @@ class GenConv(MessagePassing):
         assert self.out_channels % groups == 0, \
             "`out_channels` must be divisible by `groups`"
 
-        self.num_offsets = num_offsets
-        self.metric = metric
+        self.similarity = similarity
         self.groups = groups
-        self.temperature = temperature
 
-        if temperature == 'same':
-            self.temperature = self.num_offsets
-
-        self.offset_initializer = offset_initializer
         self.weight_initializer = weight_initializer
         self.bias_initializer = bias_initializer
 
-        self.offset = Parameter(Tensor(self.num_offsets, self.pos_channels),
-                                requires_grad=trainable_offsets)
+        if isinstance(offsets, int):
+            self.num_offsets = offsets
+            offsets = Tensor(self.num_offsets, self.pos_channels)
+            self.offset_initializer = offset_initializer
+        else:
+            if isinstance(offsets, (tuple, list)):
+                offsets = Tensor(list(product(*[offsets]*self.pos_channels)))
+            
+            self.num_offsets = offsets.size(0)
+            self.offset_initializer = offsets.clone()
+
+        if temperature == 'learn':
+            self.temperature = Parameter(Tensor([1.]))
+        elif temperature == 'same':
+            self.temperature = self.num_offsets
+        else:            
+            self.temperature = float(temperature)
+
+        learn_offsets &= not math.isinf(self.temperature)
+        self.offsets = Parameter(offsets, requires_grad=learn_offsets)
         
         param_per_offset = self.out_channels*self.in_channels//self.groups
-        self.weight = Parameter(Tensor(self.num_offsets, param_per_offset))
+        self.weights = Parameter(Tensor(self.num_offsets, param_per_offset))
 
         if bias:
             self.bias = Parameter(Tensor(1, self.out_channels))
@@ -60,9 +75,14 @@ class GenConv(MessagePassing):
 
         self.reset_parameters()
 
-    def reset_parameter(self, param: Tensor, initializer: str):
-        if initializer == 'zeros':
+    def reset_parameter(self, param: Parameter, initializer: Union[str, Tensor]):
+        if torch.is_tensor(initializer):
+            with torch.no_grad():
+                param.set_(initializer.clone())
+        elif initializer == 'zeros':
             inits.zeros(param)
+        elif initializer == 'ones':
+            inits.ones(param)
         elif initializer == 'glorot':
             inits.glorot(param)
         elif initializer == 'uniform':
@@ -73,27 +93,36 @@ class GenConv(MessagePassing):
             torch.nn.init.orthogonal_(param)
 
     def reset_parameters(self):
-        self.reset_parameter(self.weight, self.weight_initializer)
+        self.reset_parameter(self.weights, self.weight_initializer)
         self.reset_parameter(self.bias, self.bias_initializer)
-        self.reset_parameter(self.offset, self.offset_initializer)
+        self.reset_parameter(self.offsets, self.offset_initializer)
 
-    def pairwise_similarity(self, offset: Tensor) -> Tensor:
-        if self.metric == 'euclidean':
-            return -torch.cdist(offset, self.offset)
+        if torch.is_tensor(self.temperature):
+            self.reset_parameter(self.temperature, 'ones')
+
+    def pairwise_similarity(self, offsets: Tensor) -> Tensor:
+        if self.similarity == 'dot':
+            return offsets @ self.offsets.T
         
-        if self.metric == 'cosine':
-            obs = F.normalize(offset, p=2, dim=-1)
-            exp = F.normalize(self.offset, p=2, dim=-1)
+        if self.similarity == 'cosine':
+            obs = F.normalize(offsets, p=2, dim=-1)
+            exp = F.normalize(self.offsets, p=2, dim=-1)
 
             return obs @ exp.T
         
-        if self.metric == 'delta-norm':
-            obs = torch.norm(offset, p=2, dim=-1, keepdim=True)
-            exp = torch.norm(self.offset, p=2, dim=-1, keepdim=True)
+        if self.similarity == 'delta-norm':
+            obs = torch.norm(offsets, p=2, dim=-1, keepdim=True)
+            exp = torch.norm(self.offsets, p=2, dim=-1, keepdim=True)
 
             return -torch.abs(obs - exp.T)
+        
+        if self.similarity == 'neg-euclidean':
+            return -torch.cdist(offsets, self.offsets)
+        
+        if self.similarity == 'inv-euclidean':
+            return 1/(1 + torch.cdist(offsets, self.offsets))
 
-        return offset @ self.offset.T
+        return self.similarity(offsets, self.offsets)
 
     def forward(self, x: Tensor, edge_index: Adj,
                 edge_attr: OptTensor = None, pos: OptTensor = None) -> Tensor:
@@ -111,9 +140,17 @@ class GenConv(MessagePassing):
     def message(self, x_j: Tensor, pos_i: Tensor, pos_j: Tensor, 
                 edge_attr: OptTensor = None) -> Tensor:
         sim = self.pairwise_similarity(pos_j - pos_i)
-        alpha = torch.softmax(sim*self.temperature, dim=-1)
 
-        W_j = alpha @ self.weight
+        if math.isinf(self.temperature):
+            if self.temperature > 0:
+                idx = torch.argmax(sim, dim=-1)
+            else:
+                idx = torch.argmin(sim, dim=-1)
+
+            W_j = self.weights[idx]
+        else:
+            alpha = torch.softmax(sim*self.temperature, dim=-1)
+            W_j = alpha @ self.weights
 
         W_j = W_j.view(-1, self.groups, self.out_channels//self.groups,
                        self.in_channels//self.groups)
