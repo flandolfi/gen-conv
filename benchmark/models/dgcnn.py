@@ -65,6 +65,8 @@ class DGCNN(Baseline):
 
 class CustomDGCNN(Baseline):
     def __init__(self, dataset: InMemoryDataset,
+                 similarity: str = 'cosine',
+                 offsets: int = 8,
                  *args, **kwargs):
         super().__init__(dataset=dataset, *args, **kwargs)
         
@@ -77,7 +79,8 @@ class CustomDGCNN(Baseline):
 
         c = 64
         emb_dim = 1024
-        conv_kwargs = dict(bias=False, aggr='max', metric='cosine', temperature='same', pos_channels=pos_channels)
+        conv_kwargs = dict(bias=False, aggr='max', similarity=similarity, offsets=offsets,
+                           temperature='learn', pos_channels=pos_channels)
         signature = 'x, e_i, e_w, p'
 
         self.conv1 = PyGSeq(signature, [
@@ -91,18 +94,12 @@ class CustomDGCNN(Baseline):
             (LeakyReLU(0.2), 'x -> x'),
         ])
         self.conv3 = PyGSeq(signature, [
-            (GenConv(in_channels=c, out_channels=c*2, groups=c, **conv_kwargs), f'{signature} -> x'),
-            (BatchNorm(c*2), 'x -> x'),
-            (LeakyReLU(0.2), 'x -> x'),
-            (Linear(in_channels=c*2, out_channels=c*2, bias=False)),
+            (GenConv(in_channels=c, out_channels=c*2, **conv_kwargs), f'{signature} -> x'),
             (BatchNorm(c*2), 'x -> x'),
             (LeakyReLU(0.2), 'x -> x'),
         ])
         self.conv4 = PyGSeq(signature, [
-            (GenConv(in_channels=c*2, out_channels=c*4, groups=c*2, **conv_kwargs), f'{signature} -> x'),
-            (BatchNorm(c*4), 'x -> x'),
-            (LeakyReLU(0.2), 'x -> x'),
-            (Linear(in_channels=c*4, out_channels=c*4, bias=False)),
+            (GenConv(in_channels=c*2, out_channels=c*4, **conv_kwargs), f'{signature} -> x'),
             (BatchNorm(c*4), 'x -> x'),
             (LeakyReLU(0.2), 'x -> x'),
         ])
