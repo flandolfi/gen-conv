@@ -1,27 +1,27 @@
 from abc import abstractmethod
 
 import torch
+from torch.nn import CrossEntropyLoss
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 
 from torch_geometric.data import InMemoryDataset
 
 from pytorch_lightning import LightningModule
-from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
+
+from torchmetrics.functional import accuracy
 
 
 class Baseline(LightningModule):
     def __init__(self, dataset: InMemoryDataset,
                  lr: float = 0.001,
-                 patience: int = 500,
                  cosine_t_0: int = 20,
                  cosine_t_mult: int = 2,
                  label_smoothing: float = 0.2):
         super(Baseline, self).__init__()
 
         self.dataset = dataset
-        self.loss = torch.nn.CrossEntropyLoss(label_smoothing=label_smoothing)
-        self.patience = patience
+        self.loss = CrossEntropyLoss(label_smoothing=label_smoothing)
         self.lr = lr
         self.cosine_t_0 = cosine_t_0
         self.cosine_t_mult = cosine_t_mult
@@ -46,6 +46,7 @@ class Baseline(LightningModule):
         y_hat = self(data.x, data.pos, data.edge_index, data.edge_attr, data.batch)
         loss = self.loss(y_hat, data.y)
         acc = self.accuracy(y_hat, data.y)
+        
         self.log('val_loss', loss, prog_bar=True, on_step=False,
                  on_epoch=True, batch_size=y_hat.size(0))
         self.log('val_acc', acc, prog_bar=True, on_step=False,
@@ -57,17 +58,17 @@ class Baseline(LightningModule):
 
     def test_step(self, data, batch_idx):
         y_hat = self(data.x, data.pos, data.edge_index, data.edge_attr, data.batch)
-        acc = self.accuracy(y_hat, data.y)
+        acc = accuracy(y_hat, data.y, task="multiclass", 
+                       num_classes=self.dataset.num_classes)
+        bal_acc = accuracy(y_hat, data.y, task="multiclass", average="macro", 
+                           num_classes=self.dataset.num_classes)
+
         self.log('test_acc', acc, prog_bar=True, on_step=False,
+                 on_epoch=True, batch_size=y_hat.size(0))
+        self.log('test_bal_acc', bal_acc, prog_bar=True, on_step=False,
                  on_epoch=True, batch_size=y_hat.size(0))
 
     def configure_optimizers(self):
         opt = Adam(self.parameters(), lr=self.lr)
         sch = CosineAnnealingWarmRestarts(opt, self.cosine_t_0, self.cosine_t_mult)
         return [opt], [sch]
-
-    def configure_callbacks(self):
-        early_stop = EarlyStopping(monitor="val_loss", mode="min",
-                                   patience=self.patience)
-        checkpoint = ModelCheckpoint(monitor="val_acc", mode="max")
-        return [early_stop, checkpoint]

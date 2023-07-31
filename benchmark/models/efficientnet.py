@@ -15,7 +15,7 @@ from torch_geometric.nn.aggr import MultiAggregation, MaxAggregation, MeanAggreg
 from gconv.conv import GenConv
 from gconv.pool import KMISPooling
 
-from benchmark.models.baseline import Baseline
+from .baseline import Baseline
 
 
 class StochasticDepth(Module):
