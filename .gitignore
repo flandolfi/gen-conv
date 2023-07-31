@@ -162,4 +162,4 @@ data
 lightning_logs
 notebooks
 results
-models
+/models/
