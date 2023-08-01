@@ -115,7 +115,7 @@ def train(model: str = 'CustomDGCNN',
     }
 
     if valid_size > 0.:
-        checkpoint_kwargs.update(monitor='val_loss', mode='min')
+        checkpoint_kwargs.update(monitor='val_acc', mode='max')
     
     pl.seed_everything(seed, workers=True)
     datamodule = get_datasets(dataset, data_path,
