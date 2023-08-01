@@ -144,9 +144,12 @@ def test(model: str = 'CustomDGCNN',
          result_name: str = '{dataset}_{model}_test',
          **trainer_kwargs):
     config = dict(config or {})
-    result_name = result_name.format(dataset=dataset, model=model)
     checkpoint_path = checkpoint_path.format(dataset=dataset, model=model)
     model_paths = glob.glob(os.path.join(checkpoint_path, checkpoint_name))
+    result_name = result_name.format(dataset=dataset, model=model)
+
+    if not result_name.endswith('.json'):
+        result_name += '.json'
 
     pl.seed_everything(seed, workers=True)
     datamodule = get_datasets(dataset, data_path,
