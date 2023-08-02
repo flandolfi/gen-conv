@@ -6,7 +6,7 @@ import glob
 import os
 
 from torch_geometric.data.lightning import LightningDataset
-from torch_geometric.datasets import TUDataset, MalNetTiny
+from torch_geometric.datasets import TUDataset, LRGBDataset
 from torch_geometric import transforms as T
 
 import pytorch_lightning as pl
@@ -22,7 +22,7 @@ from tqdm import tqdm
 
 from . import models
 from .datasets import ModelNet40
-from .transforms import PreSelect, ClonePos, RandomTranslate
+from .transforms import PreSelect, ClonePos, RandomTranslate, GetPosInfo
 
 warnings.filterwarnings("ignore", category=Warning)
 warnings.filterwarnings("ignore", category=DeprecationWarning)
@@ -38,7 +38,7 @@ def get_datasets(dataset: str = 'ModelNet40',
     root = os.path.realpath(root)
 
     with FileLock(os.path.expanduser('~/.data.lock')):
-        if dataset in {'ModelNet40', 'model-net'}:
+        if dataset == 'ModelNet40':
             root = os.path.join(root, 'ModelNet40')
             pre_transform = T.Compose([
                 PreSelect(1024),
@@ -69,6 +69,18 @@ def get_datasets(dataset: str = 'ModelNet40',
                 valid_dataset = train_dataset[valid_idx]
                 train_dataset = train_dataset[train_idx]
                 valid_dataset.transform = valid_transform
+        elif dataset.lower() in LRGBDataset.names:
+            if dataset.lower().endswith('-sp'):
+                transform = GetPosInfo(slice(-2, None))
+            else:
+                transform = None
+
+            train_dataset = LRGBDataset(root=root, name=dataset,
+                                        transform=transform, split='train')
+            valid_dataset = LRGBDataset(root=root, name=dataset,
+                                        transform=transform, split='val')
+            test_dataset = LRGBDataset(root=root, name=dataset,
+                                       transform=transform, split='test')
         else:
             dataset = TUDataset(root=root, name=dataset)
 

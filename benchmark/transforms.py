@@ -35,3 +35,12 @@ class ClonePos(BaseTransform):
     def __call__(self, data: Data):
         data['x'] = data.pos
         return data
+
+
+class GetPosInfo(BaseTransform):
+    def __init__(self, index: slice):
+        self.index = index
+
+    def __call__(self, data: Data):
+        data['pos'] = data.x[:, self.index]
+        return data
