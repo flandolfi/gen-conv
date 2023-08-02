@@ -41,7 +41,6 @@ class VGGBlock(Module):
             
             layers.append((ReLU(), 'x -> x'))
             in_channels = out_channels
-            
 
         self.convs = Sequential('x, e_i, e_w, p', layers)
         self.pool = KMISPooling(in_channels=out_channels, k=1, aggr_x='max')
@@ -64,8 +63,8 @@ class VGG16(Baseline):
         out_channels = dataset.num_classes
         pos_channels = None
 
-        if dataset.data.pos is not None:
-            pos_channels = dataset.data.pos.size(1)
+        if dataset[0].pos is not None:
+            pos_channels = dataset[0].pos.size(1)
 
         c = 64
         signature = 'x, e_i, e_w, pos, b -> x, e_i, e_w, pos, b'

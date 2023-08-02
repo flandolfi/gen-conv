@@ -259,8 +259,8 @@ class CustomEfficientNetV2(Baseline):
         out_channels = dataset.num_classes
         pos_channels = None
 
-        if dataset.pos is not None:
-            pos_channels = dataset.pos.size(1)
+        if dataset[0].pos is not None:
+            pos_channels = dataset[0].pos.size(1)
 
         signature = 'x, e_i, e_w, p, b'
         c = 32

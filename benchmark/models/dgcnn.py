@@ -74,8 +74,8 @@ class CustomDGCNN(Baseline):
         out_channels = dataset.num_classes
         pos_channels = None
 
-        if dataset.data.pos is not None:
-            pos_channels = dataset.data.pos.size(1)
+        if dataset[0].pos is not None:
+            pos_channels = dataset[0].pos.size(1)
 
         c = 64
         emb_dim = 1024
