@@ -1,13 +1,13 @@
 import math
 from typing import Optional, Union, Sequence, Callable
 from itertools import product
+import warnings
 
 import torch
 from torch import Tensor
-from torch.nn import Parameter, Module, functional as F
+from torch.nn import Parameter, functional as F
 
 from torch_geometric.nn import inits, knn_graph, MessagePassing
-from torch_geometric.utils import scatter
 from torch_geometric.typing import OptTensor, Adj
 
 Similarity = Callable[[Tensor, Tensor], Tensor]
@@ -137,7 +137,7 @@ class GenConv(MessagePassing):
 
         return out
 
-    def message(self, x_j: Tensor, pos_i: Tensor, pos_j: Tensor, 
+    def message(self, x_j: Tensor, pos_i: Tensor, pos_j: Tensor,
                 edge_attr: OptTensor = None) -> Tensor:
         sim = self.pairwise_similarity(pos_j - pos_i)
 
@@ -159,7 +159,10 @@ class GenConv(MessagePassing):
         msg = (W_j @ x_j).view(-1, self.out_channels)
 
         if edge_attr is not None:
-            msg = msg * edge_attr.view(-1, 1)
+            if edge_attr.dim() == 1 or edge_attr.size(1) == 1:
+                msg = msg * edge_attr.view(-1, 1)
+            else:
+                warnings.warn("Ignoring `edge_attr` as it has more than 1 channel.")
         
         return msg
 
@@ -178,7 +181,8 @@ class DynamicGenConv(GenConv):
         self.k = k
         self.loop = loop
 
-    def forward(self, x: Tensor, pos: OptTensor = None, batch: OptTensor = None) -> Tensor:
+    def forward(self, x: Tensor, pos: OptTensor = None,
+                batch: OptTensor = None) -> Tensor:
         if pos is None:
             pos = x
         
