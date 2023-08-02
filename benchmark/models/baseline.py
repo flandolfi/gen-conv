@@ -9,7 +9,7 @@ from torch_geometric.data import InMemoryDataset
 
 from pytorch_lightning import LightningModule
 
-from torchmetrics.functional import accuracy
+from ..metrics import accuracy, balanced_accuracy
 
 
 class Baseline(LightningModule):
@@ -26,10 +26,8 @@ class Baseline(LightningModule):
         self.cosine_t_0 = cosine_t_0
         self.cosine_t_mult = cosine_t_mult
 
-    @staticmethod
-    def accuracy(y_pred, y_true):
-        y_class = torch.argmax(y_pred, dim=-1)
-        return torch.mean(torch.eq(y_class, y_true).float())
+        self.batch_y_true = []
+        self.batch_y_pred = []
 
     @abstractmethod
     def forward(self, x=None, pos=None, edge_index=None, edge_attr=None, batch=None):
@@ -45,28 +43,40 @@ class Baseline(LightningModule):
     def validation_step(self, data, batch_idx):
         y_hat = self(data.x, data.pos, data.edge_index, data.edge_attr, data.batch)
         loss = self.loss(y_hat, data.y)
-        acc = self.accuracy(y_hat, data.y)
+        acc = accuracy(y_hat.argmax(-1), data.y)
         
         self.log('val_loss', loss, prog_bar=True, on_step=False,
                  on_epoch=True, batch_size=y_hat.size(0))
         self.log('val_acc', acc, prog_bar=True, on_step=False,
                  on_epoch=True, batch_size=y_hat.size(0))
+        
         return {
             'val_loss': loss,
             'val_acc': acc,
         }
 
+    def compute_metrics(self):
+        y_true = torch.cat(self.batch_y_true, dim=0)
+        y_pred = torch.cat(self.batch_y_pred, dim=0)
+        self.batch_y_pred.clear()
+        self.batch_y_true.clear()
+
+        return {
+            'acc': accuracy(y_pred, y_true),
+            'bal_acc': balanced_accuracy(y_pred, y_true),
+        }
+
     def test_step(self, data, batch_idx):
         y_hat = self(data.x, data.pos, data.edge_index, data.edge_attr, data.batch)
-        acc = accuracy(y_hat, data.y, task="multiclass", 
-                       num_classes=self.dataset.num_classes)
-        bal_acc = accuracy(y_hat, data.y, task="multiclass", average="macro", 
-                           num_classes=self.dataset.num_classes)
 
-        self.log('test_acc', acc, prog_bar=True, on_step=False,
-                 on_epoch=True, batch_size=y_hat.size(0))
-        self.log('test_bal_acc', bal_acc, prog_bar=True, on_step=False,
-                 on_epoch=True, batch_size=y_hat.size(0))
+        self.batch_y_true.append(data.y.clone())
+        self.batch_y_pred.append(y_hat.argmax(-1))
+
+    def on_test_epoch_end(self):
+        metrics = self.compute_metrics()
+
+        for name, value in metrics.items():
+            self.log('test_' + name, value, prog_bar=True, on_step=False, on_epoch=True)
 
     def configure_optimizers(self):
         opt = Adam(self.parameters(), lr=self.lr)
