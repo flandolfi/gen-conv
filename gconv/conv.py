@@ -5,9 +5,11 @@ import warnings
 
 import torch
 from torch import Tensor
-from torch.nn import Parameter, functional as F
+from torch.nn import Conv1d, Conv2d, Conv3d, Parameter, functional as F
 
-from torch_geometric.nn import inits, knn_graph, MessagePassing
+from torch_geometric.nn import inits
+from torch_geometric.nn.conv import MessagePassing
+from torch_geometric.nn.pool import knn_graph
 from torch_geometric.typing import OptTensor, Adj
 
 Similarity = Callable[[Tensor, Tensor], Tensor]
@@ -20,8 +22,9 @@ class GenConv(MessagePassing):
                  bias: bool = True,
                  offsets: Union[int, Sequence[float], Tensor] = 8,
                  learn_offsets: bool = True,
-                 similarity: Union[str, Similarity] = 'cosine',
-                 temperature: Union[float, str] = 'learn',
+                 similarity: Union[str, Similarity] = 'neg-euclidean',
+                 temperature: Union[float, str] = 1.,
+                 learn_temperature: bool = True,
                  groups: int = 1,
                  offset_initializer: str = 'uniform',
                  weight_initializer: str = 'kaiming_uniform',
@@ -43,6 +46,7 @@ class GenConv(MessagePassing):
 
         self.weight_initializer = weight_initializer
         self.bias_initializer = bias_initializer
+        self.temperature_initializer = float(temperature)
 
         if isinstance(offsets, int):
             self.num_offsets = offsets
@@ -55,14 +59,10 @@ class GenConv(MessagePassing):
             self.num_offsets = offsets.size(0)
             self.offset_initializer = offsets.clone()
 
-        if temperature == 'learn':
-            self.temperature = Parameter(Tensor([1.]))
-        elif temperature == 'same':
-            self.temperature = self.num_offsets
-        else:            
-            self.temperature = float(temperature)
+        self.learn_temperature = learn_temperature and not math.isinf(self.temperature_initializer)
+        self.temperature = Parameter(Tensor(1), requires_grad=self.learn_temperature)
 
-        learn_offsets &= not math.isinf(self.temperature)
+        learn_offsets &= not math.isinf(self.temperature_initializer)
         self.offsets = Parameter(offsets, requires_grad=learn_offsets)
         
         param_per_offset = self.out_channels*self.in_channels//self.groups
@@ -96,9 +96,7 @@ class GenConv(MessagePassing):
         self.reset_parameter(self.weights, self.weight_initializer)
         self.reset_parameter(self.bias, self.bias_initializer)
         self.reset_parameter(self.offsets, self.offset_initializer)
-
-        if torch.is_tensor(self.temperature):
-            self.reset_parameter(self.temperature, 'ones')
+        torch.nn.init.constant_(self.temperature, self.temperature_initializer)
 
     def pairwise_similarity(self, offsets: Tensor) -> Tensor:
         if self.similarity == 'dot':
@@ -137,7 +135,7 @@ class GenConv(MessagePassing):
 
         return out
 
-    def message(self, x_j: Tensor, pos_i: Tensor, pos_j: Tensor,
+    def message(self, x_j: Tensor, pos_i: Tensor, pos_j: Tensor,  # noqa
                 edge_attr: OptTensor = None) -> Tensor:
         sim = self.pairwise_similarity(pos_j - pos_i)
 
@@ -166,6 +164,38 @@ class GenConv(MessagePassing):
         
         return msg
 
+    @staticmethod
+    def from_regular_conv(conv: Union[Conv1d, Conv2d, Conv3d], **kwargs):
+        ndim = conv.weight.dim() - 2
+        offsets = list(product(*[range(k) for k in conv.kernel_size]))
+        offsets = torch.Tensor(offsets)
+        index = offsets.T.long()
+
+        weights = conv.weight.permute(tuple(range(2, 2 + ndim)) + (0, 1))
+        weights = weights[tuple(index)].flatten(start_dim=1)
+
+        if conv.padding == 'same':
+            offsets = offsets - offsets.max(0)[0] // 2
+        elif isinstance(conv.padding, tuple):
+            padding = torch.Tensor([conv.padding])
+            offsets = offsets - padding
+
+        out = GenConv(in_channels=conv.in_channels,
+                      out_channels=conv.out_channels,
+                      pos_channels=ndim,
+                      bias=conv.bias is not None,
+                      offsets=offsets,
+                      groups=conv.groups,
+                      **kwargs)
+
+        with torch.no_grad():
+            out.weights.set_(weights)
+
+            if conv.bias is not None:
+                out.bias.set_(conv.bias.unsqueeze(0))
+
+        return out
+
 
 class DynamicGenConv(GenConv):
     def __init__(self, in_channels: int,
@@ -181,7 +211,7 @@ class DynamicGenConv(GenConv):
         self.k = k
         self.loop = loop
 
-    def forward(self, x: Tensor, pos: OptTensor = None,
+    def forward(self, x: Tensor, pos: OptTensor = None,  # noqa
                 batch: OptTensor = None) -> Tensor:
         if pos is None:
             pos = x
