@@ -1,7 +1,14 @@
+from typing import Union
+
 import torch
+
+from PIL.Image import Image
+
+from torchvision.transforms import functional as F
 
 from torch_geometric.transforms import BaseTransform
 from torch_geometric.data import Data
+from torch_geometric.utils import grid, to_undirected
 
 
 class PreSelect(BaseTransform):
@@ -44,3 +51,30 @@ class GetPosInfo(BaseTransform):
     def __call__(self, data: Data):
         data['pos'] = data.x[:, self.index]
         return data
+
+
+class ImageToGraph(BaseTransform):
+    def __call__(self, data: Union[Image, torch.Tensor]):
+        if not torch.is_tensor(data):
+            data = F.to_tensor(data)
+
+        edge_index, pos = grid(data.shape[2], data.shape[1])
+        x = data.permute(1, 2, 0)[tuple(pos.T.long())]
+
+        return Data(x=x, edge_index=edge_index, pos=pos)
+
+
+class SequenceToGraph(BaseTransform):
+    def __call__(self, data: torch.Tensor):
+        length = data.size(-1)
+        pos = torch.arange(length, dtype=torch.float).view(-1, 1)
+
+        idx = torch.arange(length * 2, dtype=torch.long)
+        row = idx // 2
+        col = (idx % 2) + row
+        mask = col < length
+        row, col = row[mask], col[mask]
+        edge_index = to_undirected(edge_index=torch.stack([row, col]),
+                                   num_nodes=length)
+
+        return Data(x=data.T, edge_index=edge_index, pos=pos)
