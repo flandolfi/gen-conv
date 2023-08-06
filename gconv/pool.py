@@ -175,6 +175,8 @@ class KMISPooling(Module):
         'curvature',
         'first',
         'last',
+        'lexical',
+        'lexicographic',
     }
 
     def __init__(self, in_channels: Optional[int] = None, k: int = 1,
@@ -260,6 +262,16 @@ class KMISPooling(Module):
         if (self.training and self.score_random_on_train) or \
                 self.scorer == 'random':
             return torch.rand((x.size(0), 1), device=x.device)
+        
+        if self.scorer in {'lexical', 'lexicographic'}:
+            if pos is not None:
+                x = pos
+            
+            tie_split = torch.arange(x.size(0), dtype=x.dtype,
+                                     device=x.device).view(-1, 1)
+            _, perm = torch.unique(torch.cat([x, tie_split], dim=-1), dim=0,
+                                   sorted=True, return_inverse=True)
+            return -perm.view(-1, 1)
 
         if self.scorer == 'curvature':
             if pos is not None:
