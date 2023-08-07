@@ -27,7 +27,7 @@ class GenPointConv(BaseGenConv):
         pts_idx, pos_idx = knn(x=pos, y=pts, k=self.k, batch_x=batch, batch_y=pts_batch)
 
         dist = torch.norm(pts[pts_idx] - pos[pos_idx], p=2, dim=-1).view(-1, self.k)
-        sim = torch.softmax(dist * self.temperature, dim=-1)
+        sim = torch.softmax(-dist * self.temperature, dim=-1)
 
         x_j = torch.einsum('pk,pkc->pc', sim, x[pos_idx.view(-1, self.k)])
         x_j = x_j.view(-1, self.num_offsets, self.groups, self.in_channels // self.groups)
