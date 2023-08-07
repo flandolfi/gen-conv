@@ -8,7 +8,7 @@ from torch_geometric.nn import knn_graph
 from torch_geometric.nn.aggr import MultiAggregation, MeanAggregation, MaxAggregation
 
 from .baseline import Baseline
-from gconv.conv import GenGraphConv
+from gconv.conv import GenGraphConv, GenPointConv
 from gconv.pool import KMISPooling
 
 
@@ -27,13 +27,13 @@ class DGCNN(Baseline):
         emb_dim = 1024
 
         self.conv1 = DynamicEdgeConv(Sequential(Linear(in_channels=in_channels*2, out_channels=c, bias=False),
-                                         BatchNorm(c), LeakyReLU(0.2)), self.k)
+                                                BatchNorm(c), LeakyReLU(0.2)), self.k)
         self.conv2 = DynamicEdgeConv(Sequential(Linear(in_channels=c*2, out_channels=c, bias=False),
-                                         BatchNorm(c), LeakyReLU(0.2)), self.k)
+                                                BatchNorm(c), LeakyReLU(0.2)), self.k)
         self.conv3 = DynamicEdgeConv(Sequential(Linear(in_channels=c*2, out_channels=c*2, bias=False),
-                                         BatchNorm(c*2), LeakyReLU(0.2)), self.k)
+                                                BatchNorm(c*2), LeakyReLU(0.2)), self.k)
         self.conv4 = DynamicEdgeConv(Sequential(Linear(in_channels=c*4, out_channels=c*4, bias=False),
-                                         BatchNorm(c*4), LeakyReLU(0.2)), self.k)
+                                                BatchNorm(c*4), LeakyReLU(0.2)), self.k)
         self.conv5 = Sequential(Linear(c + c + c*2 + c*4, emb_dim, bias=False), BatchNorm(emb_dim), LeakyReLU(0.2))
         self.mlp = Sequential(
             Linear(emb_dim*2, emb_dim//2, bias=False),
@@ -79,27 +79,26 @@ class CustomDGCNN(Baseline):
 
         c = 64
         emb_dim = 1024
-        conv_kwargs = dict(bias=False, aggr='max', similarity=similarity, offsets=offsets,
-                           temperature='learn', pos_channels=pos_channels)
-        signature = 'x, e_i, e_w, p'
+        conv_kwargs = dict(bias=False, offsets=offsets, pos_channels=pos_channels)
+        signature = 'x, p, b'
 
         self.conv1 = PyGSeq(signature, [
-            (GenGraphConv(in_channels=in_channels, out_channels=c, **conv_kwargs), f'{signature} -> x'),
+            (GenPointConv(in_channels=in_channels, out_channels=c, **conv_kwargs), f'{signature} -> x'),
             (BatchNorm(c), 'x -> x'),
             (LeakyReLU(0.2), 'x -> x'),
         ])
         self.conv2 = PyGSeq(signature, [
-            (GenGraphConv(in_channels=c, out_channels=c, **conv_kwargs), f'{signature} -> x'),
+            (GenPointConv(in_channels=c, out_channels=c, **conv_kwargs), f'{signature} -> x'),
             (BatchNorm(c), 'x -> x'),
             (LeakyReLU(0.2), 'x -> x'),
         ])
         self.conv3 = PyGSeq(signature, [
-            (GenGraphConv(in_channels=c, out_channels=c*2, **conv_kwargs), f'{signature} -> x'),
+            (GenPointConv(in_channels=c, out_channels=c*2, **conv_kwargs), f'{signature} -> x'),
             (BatchNorm(c*2), 'x -> x'),
             (LeakyReLU(0.2), 'x -> x'),
         ])
         self.conv4 = PyGSeq(signature, [
-            (GenGraphConv(in_channels=c*2, out_channels=c*4, **conv_kwargs), f'{signature} -> x'),
+            (GenPointConv(in_channels=c*2, out_channels=c*4, **conv_kwargs), f'{signature} -> x'),
             (BatchNorm(c*4), 'x -> x'),
             (LeakyReLU(0.2), 'x -> x'),
         ])
@@ -118,10 +117,10 @@ class CustomDGCNN(Baseline):
         )
 
     def forward(self, x=None, pos=None, edge_index=None, edge_attr=None, batch=None):
-        x1 = self.conv1(x, edge_index, edge_attr, pos)
-        x2 = self.conv2(x1, edge_index, edge_attr, pos)
-        x3 = self.conv3(x2, edge_index, edge_attr, pos)
-        x4 = self.conv4(x3, edge_index, edge_attr, pos)
+        x1 = self.conv1(x, pos, batch)  # edge_index, edge_attr, pos)
+        x2 = self.conv2(x1, pos, batch)  # edge_index, edge_attr, pos)
+        x3 = self.conv3(x2, pos, batch)  # edge_index, edge_attr, pos)
+        x4 = self.conv4(x3, pos, batch)  # edge_index, edge_attr, pos)
 
         x = torch.cat((x1, x2, x3, x4), dim=-1)
         x = self.conv5(x)
