@@ -6,7 +6,7 @@ import torch
 from torch import Tensor
 from torch.nn import Module, functional as F
 
-from gconv.conv import GenConv
+from gconv.conv import GenGraphConv
 from gconv.pool import KMISPooling
 
 from torch_geometric.data import InMemoryDataset
@@ -32,7 +32,7 @@ class InvertedResidualBlock(Module):
 
         self.exp_lin = Linear(in_channels, multiplier*in_channels, bias=False)
         self.exp_norm = BatchNorm(multiplier*in_channels)
-        self.conv = GenConv(multiplier*in_channels, **conv_kwargs)
+        self.conv = GenGraphConv(multiplier*in_channels, **conv_kwargs)
         self.conv_norm = BatchNorm(multiplier*in_channels)
         self.red_lin = Linear(multiplier*in_channels, out_channels, bias=False)
         self.red_norm = BatchNorm(out_channels)
@@ -77,8 +77,8 @@ class MobileNetV2(Baseline):
 
         c = 32
 
-        self.conv = GenConv(in_channels=in_channels, out_channels=c,
-                            pos_channels=pos_channels)
+        self.conv = GenGraphConv(in_channels=in_channels, out_channels=c,
+                                 pos_channels=pos_channels)
         self.conv_norm = BatchNorm(c)
         self.pool = KMISPooling(in_channels=c, k=1)
         signature = 'x, e_i, e_w, pos, b -> x, e_i, e_w, pos, b'

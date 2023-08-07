@@ -8,7 +8,7 @@ from torch_geometric.nn import knn_graph
 from torch_geometric.nn.aggr import MultiAggregation, MeanAggregation, MaxAggregation
 
 from .baseline import Baseline
-from gconv.conv import GenConv, DynamicGenConv
+from gconv.conv import GenGraphConv
 from gconv.pool import KMISPooling
 
 
@@ -84,22 +84,22 @@ class CustomDGCNN(Baseline):
         signature = 'x, e_i, e_w, p'
 
         self.conv1 = PyGSeq(signature, [
-            (GenConv(in_channels=in_channels, out_channels=c, **conv_kwargs), f'{signature} -> x'),
+            (GenGraphConv(in_channels=in_channels, out_channels=c, **conv_kwargs), f'{signature} -> x'),
             (BatchNorm(c), 'x -> x'),
             (LeakyReLU(0.2), 'x -> x'),
         ])
         self.conv2 = PyGSeq(signature, [
-            (GenConv(in_channels=c, out_channels=c, **conv_kwargs), f'{signature} -> x'),
+            (GenGraphConv(in_channels=c, out_channels=c, **conv_kwargs), f'{signature} -> x'),
             (BatchNorm(c), 'x -> x'),
             (LeakyReLU(0.2), 'x -> x'),
         ])
         self.conv3 = PyGSeq(signature, [
-            (GenConv(in_channels=c, out_channels=c*2, **conv_kwargs), f'{signature} -> x'),
+            (GenGraphConv(in_channels=c, out_channels=c*2, **conv_kwargs), f'{signature} -> x'),
             (BatchNorm(c*2), 'x -> x'),
             (LeakyReLU(0.2), 'x -> x'),
         ])
         self.conv4 = PyGSeq(signature, [
-            (GenConv(in_channels=c*2, out_channels=c*4, **conv_kwargs), f'{signature} -> x'),
+            (GenGraphConv(in_channels=c*2, out_channels=c*4, **conv_kwargs), f'{signature} -> x'),
             (BatchNorm(c*4), 'x -> x'),
             (LeakyReLU(0.2), 'x -> x'),
         ])

@@ -6,7 +6,7 @@ import torch
 from torch import Tensor
 from torch.nn import Module, functional as F, ReLU
 
-from gconv.conv import GenConv
+from gconv.conv import GenGraphConv
 from gconv.pool import KMISPooling
 
 from torch_geometric.data import InMemoryDataset
@@ -32,8 +32,8 @@ class VGGBlock(Module):
         layers = []
 
         for _ in range(num_layers):
-            layers.append((GenConv(in_channels=in_channels, out_channels=out_channels, 
-                                   pos_channels=pos_channels, **conv_kwargs),
+            layers.append((GenGraphConv(in_channels=in_channels, out_channels=out_channels,
+                                        pos_channels=pos_channels, **conv_kwargs),
                            'x, e_i, e_w, p -> x'))
 
             if batch_norm:

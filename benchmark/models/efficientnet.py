@@ -12,7 +12,7 @@ from torch_geometric.nn.norm import BatchNorm
 from torch_geometric.typing import OptTensor, Adj
 from torch_geometric.nn.aggr import MultiAggregation, MaxAggregation, MeanAggregation
 
-from gconv.conv import GenConv
+from gconv.conv import GenGraphConv
 from gconv.pool import KMISPooling
 
 from .baseline import Baseline
@@ -99,11 +99,11 @@ class MobileBottleneckConv(Module):
         self.fused = fused
 
         if fused:
-            self.conv = GenConv(self.in_channels, self.exp_channels, **conv_kwargs)
+            self.conv = GenGraphConv(self.in_channels, self.exp_channels, **conv_kwargs)
         else:
             self.exp_lin = Linear(in_channels, self.exp_channels, bias=bias)
             self.exp_norm = BatchNorm(self.exp_channels, **bn_kwargs)
-            self.conv = GenConv(self.exp_channels, **conv_kwargs)
+            self.conv = GenGraphConv(self.exp_channels, **conv_kwargs)
 
         self.conv_norm = BatchNorm(self.exp_channels, **bn_kwargs)
         self.red_lin = Linear(self.exp_channels, out_channels, bias=bias)
@@ -172,8 +172,8 @@ class EfficientNetV2(Baseline):
         bn_kwargs = dict(eps=0.001, momentum=0.1, affine=True)
 
         layers = [
-            (GenConv(in_channels=in_channels, out_channels=c,
-                     pos_channels=pos_channels, bias=False), 'x, e_i, e_w, p -> x'),
+            (GenGraphConv(in_channels=in_channels, out_channels=c,
+                          pos_channels=pos_channels, bias=False), 'x, e_i, e_w, p -> x'),
             (KMISPooling(in_channels=c, k=1), f'{signature} -> {signature}, m, c'),
             (BatchNorm(in_channels=c, **bn_kwargs), 'x -> x'),
             (SiLU(True), 'x -> x'),
@@ -268,8 +268,8 @@ class CustomEfficientNetV2(Baseline):
         bn_kwargs = dict(eps=0.001, momentum=0.1, affine=True)
 
         layers = [
-            (GenConv(in_channels=in_channels, out_channels=c,
-                     pos_channels=pos_channels, bias=False), 'x, e_i, e_w, p -> x'),
+            (GenGraphConv(in_channels=in_channels, out_channels=c,
+                          pos_channels=pos_channels, bias=False), 'x, e_i, e_w, p -> x'),
             # (KMISPooling(in_channels=c, k=1), f'{signature} -> {signature}, m, c'),
             (BatchNorm(in_channels=c, **bn_kwargs), 'x -> x'),
             (SiLU(True), 'x -> x'),

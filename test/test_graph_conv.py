@@ -3,7 +3,7 @@ import pytest
 import torch
 from torch.nn import Conv1d, Conv2d
 
-from gconv.conv import GenConv
+from gconv.conv import GenGraphConv
 from benchmark.transforms import ImageToGraph, SequenceToGraph
 
 
@@ -21,7 +21,7 @@ def test_conv_1d(in_channels, out_channels, groups, length, seed):
                   padding='same', groups=groups)
     exp_out = conv(rand_sequence)
 
-    graph_conv = GenConv.from_regular_conv(conv, temperature='inf', similarity='neg-euclidean')
+    graph_conv = GenGraphConv.from_regular_conv(conv, temperature='inf', similarity='neg-euclidean')
     data = SequenceToGraph()(rand_sequence)
     obs_out = graph_conv(x=data.x, edge_index=data.edge_index, pos=data.pos)
 
@@ -45,7 +45,7 @@ def test_conv_2d(in_channels, out_channels, groups, width, height, seed):
     out_image = conv(rand_image)
     exp_out = transform(out_image).x
 
-    graph_conv = GenConv.from_regular_conv(conv, temperature='inf', similarity='neg-euclidean')
+    graph_conv = GenGraphConv.from_regular_conv(conv, temperature='inf', similarity='neg-euclidean')
     data = transform(rand_image)
     obs_out = graph_conv(x=data.x, edge_index=data.edge_index, pos=data.pos)
 
