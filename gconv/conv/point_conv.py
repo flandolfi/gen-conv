@@ -10,7 +10,7 @@ from .base_conv import BaseGenConv
 
 
 class GenPointConv(BaseGenConv):
-    def __init__(self, *args, k: int = 4, **kwargs):
+    def __init__(self, *args, k: int = 8, **kwargs):
         if k == 1:
             kwargs['learn_temperature'] = False
             kwargs['learn_offsets'] = False
@@ -27,7 +27,7 @@ class GenPointConv(BaseGenConv):
             batch = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
 
         pts = pos.unsqueeze(-1) + self.offsets.T.unsqueeze(0)
-        pts = pts.transpose(-1, -2).view(-1, self.pos_channels)
+        pts = pts.transpose(-1, -2).reshape(-1, self.pos_channels)
         pts_batch = batch.repeat_interleave(self.num_offsets)
 
         pts_idx, pos_idx = knn(x=pos, y=pts, k=self.k, batch_x=batch, batch_y=pts_batch)
@@ -43,7 +43,7 @@ class GenPointConv(BaseGenConv):
         W = self.weights.view(self.num_offsets, self.groups,
                               self.out_channels // self.groups,
                               self.in_channels // self.groups)
-        out = torch.einsum('ogji,pogi->pj', W, x_j)
+        out = torch.einsum('ogji,pogi->pgj', W, x_j).view(-1, self.out_channels)
 
         if self.bias is not None:
             out = out + self.bias

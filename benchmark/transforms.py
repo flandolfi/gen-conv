@@ -78,3 +78,24 @@ class SequenceToGraph(BaseTransform):
                                    num_nodes=length)
 
         return Data(x=data.T, edge_index=edge_index, pos=pos)
+
+
+class ImageToPointCloud(BaseTransform):
+    def __call__(self, data: Union[Image, torch.Tensor]):
+        if not torch.is_tensor(data):
+            data = F.to_tensor(data)
+
+        w, h = data.shape[1], data.shape[2]
+        idx = torch.arange(w*h, dtype=torch.long, device=data.device)
+        pos = torch.stack([idx % w, idx // w])
+        x = data.permute(1, 2, 0)[tuple(pos)]
+
+        return Data(x=x, pos=pos.T.float())
+
+
+class SequenceToPointCloud(BaseTransform):
+    def __call__(self, data: torch.Tensor):
+        pos = torch.arange(data.size(-1), dtype=torch.float,
+                           device=data.device)
+
+        return Data(x=data.T, pos=pos.view(-1, 1))
