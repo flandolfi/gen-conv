@@ -53,8 +53,8 @@ class BaseGenConv(MessagePassing):
             self.num_offsets = offsets.size(0)
             self.offset_initializer = offsets.clone()
 
-        self.learn_temperature = learn_temperature and not math.isinf(self.temperature_initializer)
-        self.temperature = Parameter(Tensor(1), requires_grad=self.learn_temperature)
+        learn_temperature &= not math.isinf(self.temperature_initializer)
+        self.temperature = Parameter(Tensor(1), requires_grad=learn_temperature)
 
         learn_offsets &= not math.isinf(self.temperature_initializer)
         self.offsets = Parameter(offsets, requires_grad=learn_offsets)

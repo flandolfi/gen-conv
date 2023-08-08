@@ -1,3 +1,5 @@
+import math
+
 import torch
 from torch import Tensor
 
@@ -8,9 +10,13 @@ from .base_conv import BaseGenConv
 
 
 class GenPointConv(BaseGenConv):
-    def __init__(self, *args, k: int = 1, **kwargs):
+    def __init__(self, *args, k: int = 4, **kwargs):
+        if k == 1:
+            kwargs['learn_temperature'] = False
+            kwargs['learn_offsets'] = False
+
         super(GenPointConv, self).__init__(*args, **kwargs)
-        self.k = k
+        self.k = 1 if math.isinf(self.temperature) else k
 
     def forward(self, x: Tensor, pos: OptTensor = None,
                 batch: OptTensor = None) -> Tensor:
@@ -26,12 +32,14 @@ class GenPointConv(BaseGenConv):
 
         pts_idx, pos_idx = knn(x=pos, y=pts, k=self.k, batch_x=batch, batch_y=pts_batch)
 
-        dist = torch.norm(pts[pts_idx] - pos[pos_idx], p=2, dim=-1).view(-1, self.k)
-        sim = torch.softmax(-dist * self.temperature, dim=-1)
+        if self.k == 1:
+            x_j = x[pos_idx]
+        else:
+            dist = torch.norm(pts[pts_idx] - pos[pos_idx], p=2, dim=-1).view(-1, self.k)
+            sim = torch.softmax(-dist * self.temperature, dim=-1)
+            x_j = torch.einsum('pk,pkc->pc', sim, x[pos_idx.view(-1, self.k)])
 
-        x_j = torch.einsum('pk,pkc->pc', sim, x[pos_idx.view(-1, self.k)])
         x_j = x_j.view(-1, self.num_offsets, self.groups, self.in_channels // self.groups)
-
         W = self.weights.view(self.num_offsets, self.groups,
                               self.out_channels // self.groups,
                               self.in_channels // self.groups)
