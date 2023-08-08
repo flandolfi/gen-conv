@@ -1,9 +1,9 @@
-from typing import Optional
+from typing import Optional, Tuple
 
 import torch
 
 from torch_geometric.typing import Adj, OptTensor, SparseTensor, Tensor
-from torch_geometric.utils import scatter
+from torch_geometric.utils import scatter, to_torch_coo_tensor, to_edge_index
 
 
 def maximal_independent_set(edge_index: Adj, k: int = 1,
@@ -73,3 +73,21 @@ def maximal_independent_set(edge_index: Adj, k: int = 1,
         min_rank[mask] = n
 
     return mis
+
+
+def k_hop(edge_index: Adj, edge_attr: OptTensor = None, k: int = 1,
+          num_nodes: Optional[int] = None) -> Tuple[Adj, OptTensor]:
+    if torch.is_tensor(edge_index):
+        adj = to_torch_coo_tensor(edge_index, edge_attr, num_nodes)
+    else:
+        adj = edge_index
+
+    out = adj
+
+    for _ in range(1, k):
+        out = adj @ out
+
+    if torch.is_tensor(edge_index):
+        return to_edge_index(out)
+
+    return out, None
