@@ -1,7 +1,10 @@
+import math
 from typing import Optional, Tuple
 
 import torch
+import torch.nn.functional as F
 
+from torch_geometric.nn.pool import radius_graph as radius_graph_p2
 from torch_geometric.typing import Adj, OptTensor, SparseTensor, Tensor
 from torch_geometric.utils import scatter, to_torch_coo_tensor, to_edge_index
 
@@ -91,3 +94,35 @@ def k_hop(edge_index: Adj, edge_attr: OptTensor = None, k: int = 1,
         return to_edge_index(out)
 
     return out, None
+
+
+def aggregate_k_hop(x: Tensor, edge_index: Adj, edge_attr: OptTensor = None,
+                    k: int = 1, reduce: str = 'mean') -> Tensor:
+    k_hop_index, _ = k_hop(edge_index, edge_attr, k)
+
+    if not torch.is_tensor(k_hop_index):
+        k_hop_index, _ = to_edge_index(k_hop_index)
+
+    row, col = k_hop_index
+    return scatter(x[row], col, dim_size=x.size(0), reduce=reduce)
+
+
+def radius_graph(x: Tensor, r: float, p: float = 2, batch: OptTensor = None,
+                 loop: bool = True, max_num_neighbors: int = 32,
+                 flow: str = 'source_to_target',
+                 num_workers: int = 1) -> Tensor:
+    if math.isinf(p):
+        adjusted_r = r*math.sqrt(2)
+    elif p > 2:
+        adjusted_r = r*math.sqrt(2)/math.pow(2, 1/p)
+    else:
+        adjusted_r = r
+
+    edge_index = radius_graph_p2(x, adjusted_r, batch, loop,
+                                 max_num_neighbors, flow, num_workers)
+
+    row, col = edge_index
+    dist = F.pairwise_distance(x[row], x[col], p=p, eps=0.)
+    mask = dist <= r
+
+    return edge_index[:, mask]
