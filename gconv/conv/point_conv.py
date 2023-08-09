@@ -40,9 +40,9 @@ class GenPointConv(BaseGenConv):
             x_j = torch.einsum('pk,pkc->pc', sim, x[pos_idx.view(-1, self.k)])
 
         x_j = x_j.view(-1, self.num_offsets, self.groups, self.in_channels // self.groups)
-        W = self.weights.view(self.num_offsets, self.groups,
-                              self.out_channels // self.groups,
-                              self.in_channels // self.groups)
+        W = self.weight.view(self.num_offsets, self.groups,
+                             self.out_channels // self.groups,
+                             self.in_channels // self.groups)
         out = torch.einsum('ogji,pogi->pgj', W, x_j).view(-1, self.out_channels)
 
         if self.bias is not None:

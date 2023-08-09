@@ -68,10 +68,10 @@ class GenGraphConv(BaseGenConv):
             else:
                 idx = torch.argmin(sim, dim=-1)
 
-            W_j = self.weights[idx]
+            W_j = self.weight[idx]
         else:
             alpha = torch.softmax(sim * self.temperature, dim=-1)
-            W_j = alpha @ self.weights
+            W_j = alpha @ self.weight
 
         W_j = W_j.view(-1, self.groups, self.out_channels // self.groups,
                        self.in_channels // self.groups)

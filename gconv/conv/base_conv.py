@@ -60,7 +60,7 @@ class BaseGenConv(MessagePassing):
         self.offsets = Parameter(offsets, requires_grad=learn_offsets)
 
         param_per_offset = self.out_channels * self.in_channels // self.groups
-        self.weights = Parameter(Tensor(self.num_offsets, param_per_offset))
+        self.weight = Parameter(Tensor(self.num_offsets, param_per_offset))
 
         if bias:
             self.bias = Parameter(Tensor(1, self.out_channels))
@@ -87,7 +87,7 @@ class BaseGenConv(MessagePassing):
             torch.nn.init.orthogonal_(param)
 
     def reset_parameters(self):
-        self.reset_parameter(self.weights, self.weight_initializer)
+        self.reset_parameter(self.weight, self.weight_initializer)
         self.reset_parameter(self.bias, self.bias_initializer)
         self.reset_parameter(self.offsets, self.offset_initializer)
         torch.nn.init.constant_(self.temperature, self.temperature_initializer)
@@ -103,8 +103,8 @@ class BaseGenConv(MessagePassing):
         offsets = torch.Tensor(offsets)
         index = offsets.T.long()
 
-        weights = conv.weight.permute(tuple(range(2, 2 + ndim)) + (0, 1))
-        weights = weights[tuple(index)].flatten(start_dim=1)
+        weight = conv.weight.permute(tuple(range(2, 2 + ndim)) + (0, 1))
+        weight = weight[tuple(index)].flatten(start_dim=1)
 
         if conv.padding == 'same':
             offsets = offsets - offsets.max(0)[0] // 2
@@ -121,7 +121,7 @@ class BaseGenConv(MessagePassing):
                   **kwargs)
 
         with torch.no_grad():
-            out.weights.set_(weights)
+            out.weight.set_(weight)
 
             if conv.bias is not None:
                 out.bias.set_(conv.bias.unsqueeze(0))
