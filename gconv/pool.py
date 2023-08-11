@@ -180,16 +180,16 @@ class KMISPooling(Module):
     }
 
     def __init__(self, in_channels: Optional[int] = None, k: int = 1,
-                 scorer: Union[Scorer, str] = 'constant',
-                 score_heuristic: Optional[str] = 'greedy',
+                 scorer: Union[Scorer, str] = 'lexicographic',
+                 score_heuristic: Optional[str] = None,
                  score_heuristic_on_train: bool = True,
                  score_passthrough: Optional[str] = None,
-                 score_random_on_train: bool = True,
+                 score_random_on_train: bool = False,
                  aggr_x: Optional[Union[str, Aggregation]] = None,
                  aggr_edge: str = 'sum',
                  aggr_pos: Optional[str] = None,
                  aggr_score: Callable[[Tensor, Tensor], Tensor] = torch.mul,
-                 remove_self_loops: bool = True) -> None:
+                 remove_self_loops: bool = False) -> None:
         super(KMISPooling, self).__init__()
         assert score_heuristic in self._heuristics, \
             "Unrecognized `score_heuristic` value."
