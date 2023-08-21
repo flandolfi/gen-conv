@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Tuple, Type
 
 import torch
 from torch import Tensor
@@ -6,7 +6,7 @@ from torch.nn import Module, functional as F
 
 from torchvision.models import MobileNetV2
 
-from gconv.conv import GenGraphConv
+from gconv.conv import GenGraphConv, GenPointConv, BaseGenConv
 from gconv.pool import KMISPooling
 
 from torch_geometric.nn import Sequential
@@ -21,6 +21,7 @@ class InvertedResidualBlock(Module):
                  out_channels: int = None,
                  stride: int = 1,
                  multiplier: int = 6,
+                 conv_cls: Type[BaseGenConv] = GenGraphConv,
                  **conv_kwargs):
         super().__init__()
         conv_kwargs['groups'] = multiplier*in_channels
@@ -37,7 +38,7 @@ class InvertedResidualBlock(Module):
             self.exp_lin = Linear(in_channels, multiplier*in_channels, bias=False)
             self.exp_norm = BatchNorm(multiplier*in_channels)
 
-        self.conv = GenGraphConv(multiplier*in_channels, **conv_kwargs)
+        self.conv = conv_cls(multiplier*in_channels, **conv_kwargs)
         self.conv_norm = BatchNorm(multiplier*in_channels)
         self.red_lin = Linear(multiplier*in_channels, out_channels, bias=False)
         self.red_norm = BatchNorm(out_channels)
@@ -58,11 +59,16 @@ class InvertedResidualBlock(Module):
             y = self.exp_norm(y)
             y = F.relu6(y)
 
-        y = self.conv(y, edge_index, None, pos)
+        if isinstance(self.conv, GenGraphConv):
+            y = self.conv(y, edge_index, None, pos)
+        else:
+            y = self.conv(y, pos, batch)
 
         if self.stride > 1:
             y, edge_index, edge_attr, pos, batch, _, _ = \
                 self.pool(y, edge_index, edge_attr, pos, batch)
+
+            pos = pos / self.stride
 
         y = self.conv_norm(y)
         y = F.relu6(y)
@@ -78,14 +84,18 @@ class InvertedResidualBlock(Module):
 class GenMobileNetV2(torch.nn.Module):
     def __init__(self, in_channels: int, out_channels: int,
                  pos_channels: int = None,
+                 variant: str = 'graph',
                  **conv_kwargs):
         super().__init__()
+        conv_cls = GenGraphConv if variant == 'graph' else GenPointConv
+
         conv_kwargs['pos_channels'] = pos_channels or in_channels
+        conv_kwargs['conv_cls'] = conv_cls
         conv_kwargs.setdefault('bias', False)
         conv_kwargs.setdefault('offsets', [-1, 0, 1])
         c = 32
 
-        self.conv = GenGraphConv(in_channels=in_channels, out_channels=c, **conv_kwargs)
+        self.conv = conv_cls(in_channels=in_channels, out_channels=c, **conv_kwargs)
         self.conv_norm = BatchNorm(c)
         self.pool = KMISPooling(in_channels=c, k=1, scorer='lexicographic',
                                 score_heuristic=None, score_random_on_train=False)
@@ -116,9 +126,14 @@ class GenMobileNetV2(torch.nn.Module):
         self.out = Linear(in_channels=40*c, out_channels=out_channels)
 
     def forward(self, x=None, pos=None, edge_index=None, edge_attr=None, batch=None):
-        x = self.conv.forward(x=x, edge_index=edge_index, edge_attr=edge_attr, pos=pos)
+        if isinstance(self.conv, GenGraphConv):
+            x = self.conv(x=x, edge_index=edge_index, pos=pos)
+        else:
+            x = self.conv(x=x, pos=pos, batch=batch)
+
         x, edge_index, edge_attr, pos, batch, _, _ = \
             self.pool(x, edge_index, edge_attr, pos, batch)
+        pos = pos / 2
 
         x = self.conv_norm(x)
         x = F.relu6(x)
