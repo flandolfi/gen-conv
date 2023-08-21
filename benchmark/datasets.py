@@ -1,14 +1,21 @@
 import os.path as osp
 import glob
 import h5py
+from typing import List, Tuple, Union
 
 import torch
+from torchvision.datasets import ImageNet
+from torchvision.datasets.imagenet import ARCHIVE_META, META_FILE
+
 from torch_geometric.data import (
     InMemoryDataset,
+    Dataset,
     download_url,
     extract_zip,
     Data
 )
+
+from benchmark.transforms import ImageToGraph
 
 
 class ModelNet40(InMemoryDataset):
@@ -58,3 +65,40 @@ class ModelNet40(InMemoryDataset):
 
     def __repr__(self):
         return '{}({})'.format(self.__class__.__name__, len(self))
+
+
+class GraphImageNet(Dataset):
+    def __init__(self, root, split='train', image_transform=None, graph_transform=None):
+        self.image_net = ImageNet(root, split, transform=image_transform)
+        self.image_to_graph = ImageToGraph()
+
+        super().__init__(root, transform=graph_transform)
+
+    def get(self, idx: int) -> Data:
+        sample, target = self.image_net[idx]
+        data = self.image_to_graph(sample)
+        data.y = torch.tensor([target], dtype=torch.long)
+        return data
+
+    def len(self) -> int:
+        return len(self.image_net)
+
+    def download(self):
+        pass
+
+    def process(self):
+        pass
+
+    @property
+    def raw_dir(self) -> str:
+        return self.root
+
+    @property
+    def processed_dir(self) -> str:
+        return self.root
+
+    def raw_file_names(self) -> Union[str, List[str], Tuple]:
+        return [name for name, md5 in ARCHIVE_META.items()]
+
+    def processed_file_names(self) -> Union[str, List[str], Tuple]:
+        return META_FILE
