@@ -1,7 +1,7 @@
 import os.path as osp
 import glob
 import h5py
-from typing import List, Tuple, Union
+from typing import List
 
 import torch
 from torchvision.datasets import ImageNet
@@ -97,8 +97,8 @@ class GraphImageNet(Dataset):
     def processed_dir(self) -> str:
         return self.root
 
-    def raw_file_names(self) -> Union[str, List[str], Tuple]:
+    def raw_file_names(self) -> List[str]:
         return [name for name, md5 in ARCHIVE_META.items()]
 
-    def processed_file_names(self) -> Union[str, List[str], Tuple]:
+    def processed_file_names(self) -> str:
         return META_FILE
