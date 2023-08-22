@@ -1,10 +1,10 @@
-from typing import Tuple, Type
+from typing import Tuple, Type, Optional
 
 import torch
 from torch import Tensor
 from torch.nn import Module, functional as F
 
-from torchvision.models import MobileNetV2
+from torchvision.models import MobileNetV2, mobilenet_v2, MobileNet_V2_Weights
 
 from gconv.conv import GenGraphConv, GenPointConv, BaseGenConv
 from gconv.pool import KMISPooling
@@ -149,7 +149,7 @@ class GenMobileNetV2(torch.nn.Module):
 
     @torch.no_grad()
     def from_original_model(self, model: MobileNetV2):
-        state_dict = GenGraphConv.from_regular_conv(model.features[0][0]).state_dict()
+        state_dict = BaseGenConv.from_regular_conv(model.features[0][0]).state_dict()
         state_dict['temperature'] = self.conv.state_dict()['temperature']
         self.conv.load_state_dict(state_dict)
         self.conv_norm.module.load_state_dict(model.features[0][1].state_dict())
@@ -161,7 +161,7 @@ class GenMobileNetV2(torch.nn.Module):
                 gen_block.exp_lin.load_state_dict(state_dict)
                 gen_block.exp_norm.module.load_state_dict(block.conv[0][1].state_dict())
 
-            state_dict = GenGraphConv.from_regular_conv(block.conv[-3][0]).state_dict()
+            state_dict = BaseGenConv.from_regular_conv(block.conv[-3][0]).state_dict()
             state_dict['temperature'] = gen_block.conv.state_dict()['temperature']
             gen_block.conv.load_state_dict(state_dict)
             gen_block.conv_norm.module.load_state_dict(block.conv[-3][1].state_dict())
@@ -178,3 +178,16 @@ class GenMobileNetV2(torch.nn.Module):
         self.lin.load_state_dict(state_dict)
         self.lin_norm.module.load_state_dict(last[1].state_dict())
         self.out.load_state_dict(model.classifier[1].state_dict())
+
+
+def gen_mobilenet_v2(weights: Optional[str, MobileNet_V2_Weights] = None, progress: bool = True,
+                     config: Optional[dict] = None, **kwargs):
+    config = config or {}
+    mobilenet = mobilenet_v2(weights=weights, progress=progress, **config)
+
+    kwargs.setdefault('in_channels', 3)
+    kwargs.setdefault('pos_channels', 2)
+    kwargs.setdefault('out_channels', 1000)
+    model = GenMobileNetV2(**kwargs)
+    model.from_original_model(mobilenet)
+    return model
