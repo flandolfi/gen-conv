@@ -4,12 +4,9 @@ from torch.nn import LeakyReLU, Sequential, Dropout
 from torch_geometric.nn import global_max_pool, global_mean_pool
 from torch_geometric.nn import Linear, BatchNorm, DynamicEdgeConv, Sequential as PyGSeq
 from torch_geometric.data import InMemoryDataset
-from torch_geometric.nn import knn_graph
-from torch_geometric.nn.aggr import MultiAggregation, MeanAggregation, MaxAggregation
 
 from .baseline import Baseline
 from gconv.conv import GenGraphConv, GenPointConv
-from gconv.pool import KMISPooling
 
 
 class DGCNN(Baseline):
