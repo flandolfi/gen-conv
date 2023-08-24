@@ -1,4 +1,4 @@
-from typing import Tuple, Type, Optional
+from typing import Tuple, Type, Optional, Union
 
 import torch
 from torch import Tensor
@@ -25,7 +25,6 @@ class InvertedResidualBlock(Module):
                  **conv_kwargs):
         super().__init__()
         conv_kwargs['groups'] = multiplier*in_channels
-        conv_kwargs.setdefault('similarity', 'neg-euclidean')
         conv_kwargs.setdefault('bias', False)
 
         self.in_channels = in_channels
@@ -125,7 +124,8 @@ class GenMobileNetV2(torch.nn.Module):
         self.lin_norm = BatchNorm(40*c)
         self.out = Linear(in_channels=40*c, out_channels=out_channels)
 
-    def forward(self, x=None, pos=None, edge_index=None, edge_attr=None, batch=None):
+    def forward(self, x: Tensor, edge_index: Adj, edge_attr: OptTensor = None,
+                pos: OptTensor = None, batch: OptTensor = None) -> Tensor:
         if isinstance(self.conv, GenGraphConv):
             x = self.conv(x=x, edge_index=edge_index, pos=pos)
         else:
@@ -180,8 +180,8 @@ class GenMobileNetV2(torch.nn.Module):
         self.out.load_state_dict(model.classifier[1].state_dict())
 
 
-def gen_mobilenet_v2(weights: Optional[str, MobileNet_V2_Weights] = None, progress: bool = True,
-                     config: Optional[dict] = None, **kwargs):
+def gen_mobilenet_v2(weights: Optional[Union[str, MobileNet_V2_Weights]] = None,
+                     progress: bool = True, config: Optional[dict] = None, **kwargs):
     config = config or {}
     mobilenet = mobilenet_v2(weights=weights, progress=progress, **config)
 
