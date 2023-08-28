@@ -134,6 +134,7 @@ class GenResNet(nn.Module):
 
         x, edge_index, edge_attr, pos, batch, mis, cluster = \
             self.pool(x, edge_index, edge_attr, pos, batch)
+        pos /= 2  # pos /= stride
 
         x = self.bn1(x)
         x = self.relu(x)
@@ -141,6 +142,7 @@ class GenResNet(nn.Module):
         x = aggregate_k_hop(x, edge_index, edge_attr, k=1, reduce='max')
         x, edge_index, edge_attr, pos, batch, mis, cluster = \
             self.pool(x, edge_index, edge_attr, pos, batch)
+        pos /= 2  # pos /= stride
 
         x, edge_index, edge_attr, pos, batch = self.layer1(x, edge_index, edge_attr, pos, batch)
         x, edge_index, edge_attr, pos, batch = self.layer2(x, edge_index, edge_attr, pos, batch)
