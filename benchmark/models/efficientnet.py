@@ -1,8 +1,12 @@
-from typing import Callable, Tuple, Optional
+from typing import Callable, Tuple, Optional, Type, Union
 
 import torch
 from torch import Tensor
 from torch.nn import Module, SiLU, Dropout, functional as F
+
+from torchvision.models import EfficientNet, efficientnet_v2_s, EfficientNet_V2_S_Weights
+from torchvision.models.efficientnet import MBConv, FusedMBConv
+from torchvision.ops import StochasticDepth as SD, SqueezeExcitation as SE
 
 from torch_geometric.nn import Sequential
 from torch_geometric.data import InMemoryDataset
@@ -12,7 +16,7 @@ from torch_geometric.nn.norm import BatchNorm
 from torch_geometric.typing import OptTensor, Adj
 from torch_geometric.nn.aggr import MultiAggregation, MaxAggregation, MeanAggregation
 
-from gconv.conv import GenGraphConv
+from gconv.conv import GenGraphConv, GenPointConv, BaseGenConv
 from gconv.pool import KMISPooling
 
 from .baseline import Baseline
@@ -50,6 +54,10 @@ class StochasticDepth(Module):
 
         return x * noise[batch]
 
+    def from_original_model(self, model: SD):
+        self.p = model.p
+        self.mode = model.mode
+
 
 class SqueezeExcitation(Module):
     def __init__(self, in_channels: int,
@@ -75,36 +83,44 @@ class SqueezeExcitation(Module):
         excite = self.scale_activation(self.lin_e(squeeze))
         return x*excite[batch]
 
+    @torch.no_grad()
+    def from_original_model(self, model: SE):
+        self.activation = model.activation
+        self.scale_activation = model.scale_activation
+
+        state_dict = model.fc1.state_dict()
+        state_dict['weight'] = state_dict['weight'].squeeze(-1, -2)
+        self.lin_s.load_state_dict(state_dict)
+
+        state_dict = model.fc2.state_dict()
+        state_dict['weight'] = state_dict['weight'].squeeze(-1, -2)
+        self.lin_e.load_state_dict(state_dict)
+
 
 class MobileBottleneckConv(Module):
     def __init__(self, in_channels: int,
                  out_channels: int = None,
-                 fused: bool = False,
                  multiplier: int = 6,
                  stride: int = 1,
                  squeeze: Optional[float] = 0.25,
                  stochastic_depth: float = 0.0,
                  bias: bool = False,
+                 conv_cls: Type[BaseGenConv] = GenGraphConv,
                  **conv_kwargs):
         super().__init__()
-        conv_kwargs['groups'] = 1 if fused else in_channels
         conv_kwargs['bias'] = bias
-        conv_kwargs.setdefault('metric', 'cosine')
 
         bn_kwargs = dict(eps=0.001, momentum=0.1, affine=True)
 
         self.in_channels = in_channels
         self.out_channels = out_channels or in_channels
         self.exp_channels = multiplier*in_channels
-        self.fused = fused
 
-        if fused:
-            self.conv = GenGraphConv(self.in_channels, self.exp_channels, **conv_kwargs)
-        else:
-            self.exp_lin = Linear(in_channels, self.exp_channels, bias=bias)
+        if self.in_channels != self.exp_channels:
+            self.exp_lin = Linear(self.in_channels, self.exp_channels, bias=bias)
             self.exp_norm = BatchNorm(self.exp_channels, **bn_kwargs)
-            self.conv = GenGraphConv(self.exp_channels, **conv_kwargs)
 
+        self.conv = conv_cls(self.exp_channels, groups=self.exp_channels, **conv_kwargs)
         self.conv_norm = BatchNorm(self.exp_channels, **bn_kwargs)
         self.red_lin = Linear(self.exp_channels, out_channels, bias=bias)
         self.red_norm = BatchNorm(out_channels, **bn_kwargs)
@@ -114,8 +130,7 @@ class MobileBottleneckConv(Module):
         self.pool = None
 
         if squeeze is not None:
-            self.se = SqueezeExcitation(self.exp_channels, ratio=squeeze,
-                                        activation=SiLU())
+            self.se = SqueezeExcitation(self.exp_channels, ratio=squeeze, activation=SiLU())
 
         if stride > 1:
             self.pool = KMISPooling(in_channels=multiplier*in_channels, k=stride - 1)
@@ -123,14 +138,17 @@ class MobileBottleneckConv(Module):
     def forward(self, x: Tensor, edge_index: Adj, edge_attr: OptTensor = None,
                 pos: OptTensor = None, batch: OptTensor = None) \
             -> Tuple[Tensor, Adj, OptTensor, OptTensor, OptTensor]:
-        if self.fused:
+        if self.in_channels == self.exp_channels:
             y = x
         else:
             y = self.exp_lin(x)
             y = self.exp_norm(y)
             y = F.silu(y)
 
-        y = self.conv(y, edge_index, edge_attr, pos)
+        if isinstance(self.conv, GenGraphConv):
+            y = self.conv(y, edge_index, edge_attr, pos)
+        else:
+            y = self.conv(y, pos, batch)
 
         if self.pool is not None:
             y, edge_index, edge_attr, pos, batch, mis, _ = \
@@ -145,15 +163,117 @@ class MobileBottleneckConv(Module):
 
         y = self.red_lin(y)
         y = self.red_norm(y)
-        y = self.stochastic_depth(y, batch)
 
-        if self.out_channels != self.in_channels:
-            x = F.pad(x, (0, self.out_channels - self.in_channels))
+        if self.pool is None and self.out_channels == self.in_channels:
+            y = self.stochastic_depth(y, batch)
+            y += x
 
-        return y + x, edge_index, edge_attr, pos, batch
+        return y, edge_index, edge_attr, pos, batch
+
+    def from_original_model(self, model: MBConv):
+        i = 0
+
+        if self.in_channels != self.exp_channels:
+            state_dict = model.block[i][0].state_dict()
+            state_dict['weight'] = state_dict['weight'].squeeze(-1, -2)
+            self.exp_lin.load_state_dict(state_dict)
+            self.exp_norm.module.load_state_dict(model.block[i][1].state_dict())
+            i += 1
+
+        state_dict = BaseGenConv.from_regular_conv(model.block[i][0]).state_dict()
+        state_dict['temperature'] = self.conv.state_dict()['temperature']
+        self.conv.load_state_dict(state_dict)
+        self.conv_norm.module.load_state_dict(model.block[i][1].state_dict())
+        i += 1
+
+        self.se.from_original_model(self.block[i])
+        i += 1
+
+        state_dict = model.block[i][0].state_dict()
+        state_dict['weight'] = state_dict['weight'].squeeze(-1, -2)
+        self.exp_lin.load_state_dict(state_dict)
+        self.exp_norm.module.load_state_dict(model.block[i][1].state_dict())
+
+        self.stochastic_depth.from_original_model(model.stochastic_depth)
 
 
-class EfficientNetV2(Baseline):
+class FusedMobileBottleneckConv(Module):
+    def __init__(self, in_channels: int,
+                 out_channels: int = None,
+                 multiplier: int = 6,
+                 stride: int = 1,
+                 stochastic_depth: float = 0.0,
+                 bias: bool = False,
+                 conv_cls: Type[BaseGenConv] = GenGraphConv,
+                 **conv_kwargs):
+        super().__init__()
+        conv_kwargs['bias'] = bias
+
+        bn_kwargs = dict(eps=0.001, momentum=0.1, affine=True)
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels or in_channels
+        self.exp_channels = multiplier * in_channels
+
+        if self.in_channels != self.exp_channels:
+            self.conv = conv_cls(self.in_channels, self.exp_channels, **conv_kwargs)
+            self.conv_norm = BatchNorm(self.exp_channels, **bn_kwargs)
+
+            self.red_lin = Linear(self.exp_channels, out_channels, bias=bias)
+            self.red_norm = BatchNorm(out_channels, **bn_kwargs)
+        else:
+            self.conv = conv_cls(self.in_channels, self.out_channels, **conv_kwargs)
+            self.conv_norm = BatchNorm(self.out_channels, **bn_kwargs)
+
+        self.stochastic_depth = StochasticDepth(p=stochastic_depth)
+
+        self.pool = None
+
+        if stride > 1:
+            self.pool = KMISPooling(in_channels=multiplier * in_channels, k=stride - 1)
+
+    def forward(self, x: Tensor, edge_index: Adj, edge_attr: OptTensor = None,
+                pos: OptTensor = None, batch: OptTensor = None) \
+            -> Tuple[Tensor, Adj, OptTensor, OptTensor, OptTensor]:
+        if isinstance(self.conv, GenGraphConv):
+            y = self.conv(x, edge_index, edge_attr, pos)
+        else:
+            y = self.conv(x, pos, batch)
+
+        if self.pool is not None:
+            y, edge_index, edge_attr, pos, batch, mis, _ = \
+                self.pool(y, edge_index, edge_attr, pos, batch)
+            x = x[mis]
+
+        y = self.conv_norm(y)
+        y = F.silu(y)
+
+        if self.in_channels != self.exp_channels:
+            y = self.red_lin(y)
+            y = self.red_norm(y)
+
+        if self.pool is None and self.out_channels == self.in_channels:
+            y = self.stochastic_depth(y, batch)
+            y += x
+
+        return y, edge_index, edge_attr, pos, batch
+
+    def from_original_model(self, model: FusedMBConv):
+        state_dict = BaseGenConv.from_regular_conv(model.block[0][0]).state_dict()
+        state_dict['temperature'] = self.conv.state_dict()['temperature']
+        self.conv.load_state_dict(state_dict)
+        self.conv_norm.module.load_state_dict(model.block[0][1].state_dict())
+
+        if self.in_channels != self.exp_channels:
+            state_dict = model.block[1][0].state_dict()
+            state_dict['weight'] = state_dict['weight'].squeeze(-1, -2)
+            self.exp_lin.load_state_dict(state_dict)
+            self.exp_norm.module.load_state_dict(model.block[1][1].state_dict())
+
+        self.stochastic_depth.from_original_model(model.stochastic_depth)
+
+
+class GenEfficientNetV2(Baseline):
     def __init__(self, dataset: InMemoryDataset,
                  delta_drop_probability: float = 0.005,
                  *args, **kwargs):
@@ -189,49 +309,49 @@ class EfficientNetV2(Baseline):
         mb_signature = f'{signature} -> {signature}'
 
         layers.extend([
-            (MobileBottleneckConv(in_channels=c, out_channels=c,
-                                  pos_channels=pos_channels,
-                                  fused=True, multiplier=1, squeeze=None,
-                                  stochastic_depth=next(drop_p_gen)), mb_signature),
-            (MobileBottleneckConv(in_channels=c, out_channels=c,
-                                  pos_channels=pos_channels,
-                                  fused=True, multiplier=1, squeeze=None,
-                                  stochastic_depth=next(drop_p_gen)), mb_signature),
+            (FusedMobileBottleneckConv(in_channels=c, out_channels=c,
+                                       pos_channels=pos_channels,
+                                       multiplier=1,
+                                       stochastic_depth=next(drop_p_gen)), mb_signature),
+            (FusedMobileBottleneckConv(in_channels=c, out_channels=c,
+                                       pos_channels=pos_channels,
+                                       multiplier=1,
+                                       stochastic_depth=next(drop_p_gen)), mb_signature),
         ]),
 
         for i in range(4):
-            layers.append((MobileBottleneckConv(in_channels=c if i == 0 else c*2,
-                                                pos_channels=pos_channels,
-                                                out_channels=c*2, stride=2 if i == 0 else 1,
-                                                fused=True, multiplier=4, squeeze=None,
-                                                stochastic_depth=next(drop_p_gen)), mb_signature))
+            layers.append((FusedMobileBottleneckConv(in_channels=c if i == 0 else c*2,
+                                                     pos_channels=pos_channels,
+                                                     out_channels=c*2, stride=2 if i == 0 else 1,
+                                                     multiplier=4,
+                                                     stochastic_depth=next(drop_p_gen)), mb_signature))
 
         for i in range(4):
-            layers.append((MobileBottleneckConv(in_channels=c*2 if i == 0 else 64,
-                                                pos_channels=pos_channels,
-                                                out_channels=64, stride=2 if i == 0 else 1,
-                                                fused=True, multiplier=4, squeeze=None,
-                                                stochastic_depth=next(drop_p_gen)), mb_signature))
+            layers.append((FusedMobileBottleneckConv(in_channels=c*2 if i == 0 else 64,
+                                                     pos_channels=pos_channels,
+                                                     out_channels=64, stride=2 if i == 0 else 1,
+                                                     multiplier=4,
+                                                     stochastic_depth=next(drop_p_gen)), mb_signature))
 
         for i in range(6):
             layers.append((MobileBottleneckConv(in_channels=64 if i == 0 else 128,
                                                 pos_channels=pos_channels,
                                                 out_channels=128, stride=2 if i == 0 else 1,
-                                                fused=False, multiplier=4, squeeze=0.25,
+                                                multiplier=4, squeeze=0.25,
                                                 stochastic_depth=next(drop_p_gen)), mb_signature))
 
         for i in range(9):
             layers.append((MobileBottleneckConv(in_channels=128 if i == 0 else 160,
                                                 pos_channels=pos_channels,
                                                 out_channels=160, stride=1,
-                                                fused=False, multiplier=6, squeeze=0.25,
+                                                multiplier=6, squeeze=0.25,
                                                 stochastic_depth=next(drop_p_gen)), mb_signature))
 
         for i in range(15):
             layers.append((MobileBottleneckConv(in_channels=160 if i == 0 else 256,
                                                 pos_channels=pos_channels,
                                                 out_channels=256, stride=2 if i == 0 else 1,
-                                                fused=False, multiplier=6, squeeze=0.25,
+                                                multiplier=6, squeeze=0.25,
                                                 stochastic_depth=next(drop_p_gen)), mb_signature))
 
         layers.extend([
@@ -247,6 +367,34 @@ class EfficientNetV2(Baseline):
 
     def forward(self, x=None, pos=None, edge_index=None, edge_attr=None, batch=None):
         return self.model(x, edge_index, edge_attr, pos, batch)
+
+    def from_original_model(self, model: EfficientNet):
+        state_dict = BaseGenConv.from_regular_conv(model.features[0][0]).state_dict()
+        state_dict['temperature'] = self.conv.state_dict()['temperature']
+        self.model[0].load_state_dict(state_dict)
+        self.model[2].module.load_state_dict(model.features[0][1].state_dict())
+
+        for layer, original_layer in zip(self.model[4:], model.features[1:-1]):
+            layer.from_original_model(original_layer)
+
+        state_dict = model.features[-1][0].state_dict()
+        state_dict['weight'] = state_dict['weight'].squeeze(-1, -2)
+        self.model[-6].load_state_dict(state_dict)
+        self.model[-5].module.load_state_dict(model.features[-1][1].state_dict())
+        self.model[-1].load_state_dict(model.classifier[1].state_dict())
+
+
+def gen_efficientnet_v2(weights: Optional[Union[str, EfficientNet_V2_S_Weights]] = None,
+                        progress: bool = True, config: Optional[dict] = None, **kwargs):
+    config = config or {}
+    efficientnet = efficientnet_v2_s(weights=weights, progress=progress, **config)
+
+    kwargs.setdefault('in_channels', 3)
+    kwargs.setdefault('pos_channels', 2)
+    kwargs.setdefault('out_channels', 1000)
+    model = GenEfficientNetV2(**kwargs)
+    model.from_original_model(efficientnet)
+    return model
 
 
 class CustomEfficientNetV2(Baseline):
@@ -285,22 +433,22 @@ class CustomEfficientNetV2(Baseline):
         mb_signature = f'{signature} -> {signature}'
 
         layers.extend([
-            (MobileBottleneckConv(in_channels=c, out_channels=c,
-                                  pos_channels=pos_channels,
-                                  fused=True, multiplier=1, squeeze=None,
-                                  stochastic_depth=next(drop_p_gen)), mb_signature),
-            (MobileBottleneckConv(in_channels=c, out_channels=c,
-                                  pos_channels=pos_channels,
-                                  fused=True, multiplier=1, squeeze=None,
-                                  stochastic_depth=next(drop_p_gen)), mb_signature),
+            (FusedMobileBottleneckConv(in_channels=c, out_channels=c,
+                                       pos_channels=pos_channels,
+                                       multiplier=1, squeeze=None,
+                                       stochastic_depth=next(drop_p_gen)), mb_signature),
+            (FusedMobileBottleneckConv(in_channels=c, out_channels=c,
+                                       pos_channels=pos_channels,
+                                       multiplier=1, squeeze=None,
+                                       stochastic_depth=next(drop_p_gen)), mb_signature),
         ])
 
         for i in range(3):
-            layers.append((MobileBottleneckConv(in_channels=c if i == 0 else c*2,
-                                                pos_channels=pos_channels,
-                                                out_channels=c*2, stride=2 if i == 0 else 1,
-                                                fused=True, multiplier=4, squeeze=None,
-                                                stochastic_depth=next(drop_p_gen)), mb_signature))
+            layers.append((FusedMobileBottleneckConv(in_channels=c if i == 0 else c*2,
+                                                     pos_channels=pos_channels,
+                                                     out_channels=c*2, stride=2 if i == 0 else 1,
+                                                     multiplier=4, squeeze=None,
+                                                     stochastic_depth=next(drop_p_gen)), mb_signature))
 
         # for i in range(4):
         #     layers.append((MobileBottleneckConv(in_channels=c*2 if i == 0 else 128,
@@ -313,7 +461,7 @@ class CustomEfficientNetV2(Baseline):
             layers.append((MobileBottleneckConv(in_channels=64 if i == 0 else 128,
                                                 pos_channels=pos_channels,
                                                 out_channels=128, stride=2 if i == 0 else 1,
-                                                fused=False, multiplier=4, squeeze=0.25,
+                                                multiplier=4, squeeze=0.25,
                                                 stochastic_depth=next(drop_p_gen)), mb_signature))
 
         # for i in range(9):
@@ -327,7 +475,7 @@ class CustomEfficientNetV2(Baseline):
             layers.append((MobileBottleneckConv(in_channels=128 if i == 0 else 256,
                                                 pos_channels=pos_channels,
                                                 out_channels=256, stride=2 if i == 0 else 1,
-                                                fused=False, multiplier=6, squeeze=0.25,
+                                                multiplier=6, squeeze=0.25,
                                                 stochastic_depth=next(drop_p_gen)), mb_signature))
 
         layers.extend([
