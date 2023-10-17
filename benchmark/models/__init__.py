@@ -1,4 +1,3 @@
-from .mobilenet import MobileNetV2
+from .mobilenet import GenMobileNetV2
 from .dgcnn import DGCNN, CustomDGCNN
-from .efficientnet import EfficientNetV2, CustomEfficientNetV2
-
+from .efficientnet import GenEfficientNetV2, CustomEfficientNetV2
