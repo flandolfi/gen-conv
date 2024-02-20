@@ -9,7 +9,7 @@ dependencies:
   - torchaudio
   - pip
   - pip:
-    - -f https://data.pyg.org/whl/torch-2.0.0+cu117.html
+    - -f https://data.pyg.org/whl/torch-2.0.0+cpu.html
     - pyg_lib
     - torch_geometric
     - torch_scatter
