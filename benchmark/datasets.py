@@ -67,6 +67,66 @@ class ModelNet40(InMemoryDataset):
         return '{}({})'.format(self.__class__.__name__, len(self))
 
 
+class ScanObjectNN(InMemoryDataset):
+    url = 'https://hkust-vgd.ust.hk/scanobjectnn/h5_files.zip'
+
+    def __init__(self, root, train=True, background=True,
+                 transform=None, pre_transform=None, pre_filter=None):
+        self.background = background
+        super(ScanObjectNN, self).__init__(root, transform, pre_transform, pre_filter)
+        path = self.processed_paths[0] if train else self.processed_paths[1]
+        self.data, self.slices = torch.load(path)
+
+    @property
+    def raw_file_names(self):
+        return ['h5_files.zip']
+
+    @property
+    def processed_file_names(self):
+        trail = '' if self.background else '_nobg'
+        return [f'training{trail}.pt', f'test{trail}.pt']
+
+    def download(self):
+        path = download_url(self.url, self.raw_dir)
+        extract_zip(path, self.raw_dir)
+
+    def process(self):
+        torch.save(self.process_set('training'), self.processed_paths[0])
+        torch.save(self.process_set('test'), self.processed_paths[1])
+
+    def process_set(self, dataset):
+        data_list = []
+        trail = '' if self.background else '_nobg'
+
+        with h5py.File(osp.join(self.raw_dir, 'h5_files', f'main_split{trail}',
+                                f'{dataset}_objectdataset.h5')) as f:
+            pos_part = f['data'][:].astype('float32')
+            y_part = f['label'][:].astype('int64')
+
+            if self.background:
+                mask_part = f['mask'][:] != -1
+
+                for pos, mask, y in zip(pos_part, mask_part, y_part):
+                    data_list.append(Data(pos=torch.as_tensor(pos),
+                                          mask=torch.as_tensor(mask),
+                                          y=torch.as_tensor(y)))
+            else:
+                for pos, y in zip(pos_part, y_part):
+                    data_list.append(Data(pos=torch.as_tensor(pos),
+                                          y=torch.as_tensor(y)))
+
+        if self.pre_filter is not None:
+            data_list = [d for d in data_list if self.pre_filter(d)]
+
+        if self.pre_transform is not None:
+            data_list = [self.pre_transform(d) for d in data_list]
+
+        return self.collate(data_list)
+
+    def __repr__(self):
+        return '{}({})'.format(self.__class__.__name__, len(self))
+
+
 class GraphImageNet(Dataset):
     def __init__(self, root, split='train', image_transform=None, graph_transform=None):
         self.image_net = ImageNet(root, split, transform=image_transform)
