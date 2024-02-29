@@ -69,10 +69,22 @@ class ModelNet40(InMemoryDataset):
 
 class ScanObjectNN(InMemoryDataset):
     url = 'https://hkust-vgd.ust.hk/scanobjectnn/h5_files.zip'
+    perturbations = {
+        None: '',
+        'PB_T25': '_augmented25_norot',
+        'PB_T25_R': '_augmented25rot',
+        'PB_T50_R': '_augmentedrot',
+        'PB_T50_RS': '_augmentedrot_scale75',
+    }
 
-    def __init__(self, root, train=True, background=True,
+    def __init__(self, root, train=True, background=True, perturbation=None,
                  transform=None, pre_transform=None, pre_filter=None):
+        assert perturbation in self.perturbations, \
+            f"Invalid perturbation. Available perturbations are: " \
+            f"{list(self.perturbations.keys())}"
+
         self.background = background
+        self.perturbation = self.perturbations[perturbation]
         super(ScanObjectNN, self).__init__(root, transform, pre_transform, pre_filter)
         path = self.processed_paths[0] if train else self.processed_paths[1]
         self.data, self.slices = torch.load(path)
@@ -83,7 +95,8 @@ class ScanObjectNN(InMemoryDataset):
 
     @property
     def processed_file_names(self):
-        trail = '' if self.background else '_nobg'
+        trail = self.perturbation
+        trail += '' if self.background else '_nobg'
         return [f'training{trail}.pt', f'test{trail}.pt']
 
     def download(self):
@@ -97,9 +110,10 @@ class ScanObjectNN(InMemoryDataset):
     def process_set(self, dataset):
         data_list = []
         trail = '' if self.background else '_nobg'
+        file_name = f'{dataset}_objectdataset{self.perturbation}.h5'
 
-        with h5py.File(osp.join(self.raw_dir, 'h5_files', f'main_split{trail}',
-                                f'{dataset}_objectdataset.h5')) as f:
+        with h5py.File(osp.join(self.raw_dir, 'h5_files',
+                                f'main_split{trail}', file_name)) as f:
             pos_part = f['data'][:].astype('float32')
             y_part = f['label'][:].astype('int64')
 
